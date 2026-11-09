@@ -1,0 +1,14 @@
+{
+  "name": "arithlab-plus-workspace",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "install:all": "npm install --prefix frontend",
+    "dev": "concurrently -k -n FRONTEND,BACKEND -c blue,green \"npm --prefix frontend run dev\" \"python -m uvicorn backend.main:app --reload --port 8000\"",
+    "build": "npm --prefix frontend run build",
+    "test:backend": "python -m unittest backend.tests"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

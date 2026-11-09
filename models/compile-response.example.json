@@ -1,0 +1,15 @@
+{
+  "tokens": [
+    {
+      "type": "NÚMERO",
+      "value": 10,
+      "position": 1
+    }
+  ],
+  "ast": null,
+  "ast_text": "",
+  "simbolos": [],
+  "tipos": [],
+  "errores": [],
+  "resultado": null
+}
