@@ -71,6 +71,29 @@ npm run dev:all
 
 La opción manual requiere dos terminales: FastAPI en `http://localhost:8000` y Vite en `http://localhost:5173`.
 
+## Conectar Gemini
+
+Gemini se ejecuta únicamente en el backend. La clave nunca se coloca en React ni se publica en el navegador.
+
+1. Crea una clave en Google AI Studio:
+   `https://aistudio.google.com/apikey`
+2. En Windows PowerShell, antes de iniciar el backend:
+
+```powershell
+$env:GEMINI_API_KEY="PEGA_AQUI_TU_CLAVE"
+$env:GEMINI_MODEL="gemini-2.5-flash"
+python -m uvicorn backend.main:app --reload --port 8000
+```
+
+Para Render, agrega estas variables en **Environment**:
+
+```text
+GEMINI_API_KEY=tu-clave
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+Si `GEMINI_API_KEY` no está configurada, el sistema sigue funcionando con las explicaciones locales deterministas.
+
 ## Sustentación
 
 1. **Léxico:** recorre la cadena, agrupa dígitos en números, reconoce operadores y reporta todos los caracteres inválidos con posición.

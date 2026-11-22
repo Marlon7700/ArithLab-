@@ -10,7 +10,7 @@ const examples = [
   ["Con error", "7 $ 3 & 2"],
 ];
 
-const emptyResult = { tokens: [], ast: null, ast_text: "", simbolos: [], tipos: [], errores: [], resultado: null, codigo_maquina: [], pasos_resolucion: [] };
+const emptyResult = { tokens: [], ast: null, ast_text: "", simbolos: [], tipos: [], errores: [], resultado: null, codigo_maquina: [], pasos_resolucion: [], explicacion_ia: "", explicacion_semantica: "", explicacion_codigo_maquina: "", modelo_ia: "determinista", base_posiciones: 1 };
 
 const menuIcons = {
   Simulador: "▦",
@@ -340,13 +340,13 @@ export default function App() {
   const [typedProcess, setTypedProcess] = useState("");
 
   const processText = result.ast
-    ? `El resultado final de la operación es ${result.resultado}.\n\nResolución paso a paso\nSiguiendo la jerarquía de las operaciones, primero resolvemos * y / y luego las sumas y restas de izquierda a derecha:\n\n${result.pasos_resolucion.map((stepItem, index) => `${index + 1}. ${stepItem.priority === "prioritaria" ? "Operación prioritaria" : "Operación de izquierda a derecha"}:\n${stepItem.calculation}\nLa expresión queda: ${stepItem.expression}`).join("\n\n")}\n\nEl AST representa este mismo orden: los operadores son nodos internos y los números son hojas. La máquina de pila traduce cada reducción a instrucciones y guarda el resultado final en R0.`
+    ? (result.explicacion_ia || `El resultado final de la operación es ${result.resultado}.\n\nResolución paso a paso\nSiguiendo la jerarquía de las operaciones, primero resolvemos * y / y luego las sumas y restas de izquierda a derecha:\n\n${result.pasos_resolucion.map((stepItem, index) => `${index + 1}. ${stepItem.priority === "prioritaria" ? "Operación prioritaria" : "Operación de izquierda a derecha"}:\n${stepItem.calculation}\nLa expresión queda: ${stepItem.expression}`).join("\n\n")}\n\nEl AST representa este mismo orden: los operadores son nodos internos y los números son hojas. La máquina de pila traduce cada reducción a instrucciones y guarda el resultado final en R0.`)
     : "";
   const semanticExplanation = result.ast
-    ? `Se recorrió el AST para identificar cada número literal. Los valores únicos encontrados fueron ${result.simbolos.map((item) => item.symbol).join(", ") || "ninguno"}.\n\nCada número aparece una sola vez en la tabla semántica. Su dirección simulada representa el lugar que ocuparía en memoria: ${result.simbolos.map((item) => `${item.symbol} → ${item.address}`).join(", ") || "sin símbolos"}.\n\nEsto permite reutilizar el mismo símbolo si el número vuelve a aparecer y evita crear registros duplicados.`
+    ? (result.explicacion_semantica || `Se recorrió el AST para identificar cada número literal. Los valores únicos encontrados fueron ${result.simbolos.map((item) => item.symbol).join(", ") || "ninguno"}.\n\nCada número aparece una sola vez en la tabla semántica. Su dirección simulada representa el lugar que ocuparía en memoria: ${result.simbolos.map((item) => `${item.symbol} → ${item.address}`).join(", ") || "sin símbolos"}.\n\nEsto permite reutilizar el mismo símbolo si el número vuelve a aparecer y evita crear registros duplicados.`)
     : "";
   const machineExplanation = result.codigo_maquina?.length
-    ? `El AST se convierte a código máquina mediante recorrido postorden: primero se visita el hijo izquierdo, luego el hijo derecho y al final el operador.\n\n${result.codigo_maquina.map((instruction, index) => {
+    ? (result.explicacion_codigo_maquina || `El AST se convierte a código máquina mediante recorrido postorden: primero se visita el hijo izquierdo, luego el hijo derecho y al final el operador.\n\n${result.codigo_maquina.map((instruction, index) => {
       const number = instruction.startsWith("PUSH ") ? instruction.slice(5) : "";
       const explanation = instruction === "ADD"
         ? "Retira los dos últimos valores de la pila y coloca su suma."
@@ -360,7 +360,7 @@ export default function App() {
                 ? "Guarda el resultado final de la pila en el registro R0."
                 : `Carga el número ${number} en la pila como operando.`;
       return `${index + 1}. ${instruction}: ${explanation}`;
-    }).join("\n\n")}\n\nPor esta razón, la pila representa los operandos temporalmente y cada instrucción reduce dos valores hasta obtener un resultado final.`
+    }).join("\n\n")}\n\nPor esta razón, la pila representa los operandos temporalmente y cada instrucción reduce dos valores hasta obtener un resultado final.`)
     : "";
 
   useEffect(() => {
@@ -378,12 +378,37 @@ export default function App() {
   async function compile() {
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/compilar`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source }) });
+      const response = await fetch(`${API_URL}/compilar`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source, zero_based: zeroBased }) });
       if (!response.ok) {
         const detail = await response.text();
         throw new Error(`HTTP ${response.status}${detail ? `: ${detail.slice(0, 120)}` : ""}`);
       }
-      setResult(await response.json());
+      const compiled = await response.json();
+      setResult(compiled);
+      if (compiled.ast && compiled.errores.length === 0) {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 12000);
+        fetch(`${API_URL}/explicar`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ source, zero_based: zeroBased }),
+          signal: controller.signal,
+        })
+          .then((explanationResponse) => explanationResponse.ok ? explanationResponse.json() : null)
+          .then((improved) => {
+            if (improved) {
+              setResult((current) => ({
+                ...current,
+                explicacion_ia: improved.explicacion_ia || current.explicacion_ia,
+                explicacion_semantica: improved.explicacion_semantica || current.explicacion_semantica,
+                explicacion_codigo_maquina: improved.explicacion_codigo_maquina || current.explicacion_codigo_maquina,
+                modelo_ia: improved.modelo_ia || current.modelo_ia,
+              }));
+            }
+          })
+          .catch(() => undefined)
+          .finally(() => window.clearTimeout(timeout));
+      }
     } catch (error) {
       setResult({ ...emptyResult, errores: [`Backend no disponible. Ejecuta: python -m uvicorn backend.main:app --reload --port 8000 (${error.message})`] });
     } finally { setLoading(false); }
@@ -430,7 +455,7 @@ export default function App() {
       <div className="brand"><div className="brand-mark"><BrandIcon /></div><div><h1>ArithLab<span>+</span></h1><p>Tokeniza. Parsea.<br />Entiende.</p></div></div>
       <nav>{stepMenu.map(([item, targetId, icon], index) => <button key={item} className={step === index ? "nav-item active" : "nav-item"} onClick={() => openStep(item, targetId)}><span className="nav-icon nav-step-icon" aria-hidden="true">{icon}</span><span className="nav-step-number">{String(index + 1).padStart(2, "0")}</span><span>{item}</span></button>)}</nav>
       <div className="sidebar-tools"><button className={section === "Errores" ? "nav-item active" : "nav-item"} onClick={() => setSection("Errores")}><span className="nav-icon" aria-hidden="true">⚠</span><span>Errores</span></button><button className={section === "Teoría" ? "nav-item active" : "nav-item"} onClick={() => setSection("Teoría")}><span className="nav-icon" aria-hidden="true">◈</span><span>Teoría</span></button></div>
-      <div className="sidebar-foot"><span className="status-dot" /> API Python conectable<br /><small>v1.0 · Laboratorio de compiladores</small></div>
+      <div className="sidebar-foot"><span className="status-dot" /> API Python conectable<br /><small>IA: {result.modelo_ia || "determinista"}</small></div>
     </aside>
     <main className="main-content">
       <header className="topbar"><div><p className="eyebrow">LABORATORIO / {section.toUpperCase()}</p><h2><AnimatedTitle>Simulador de compilador aritmético</AnimatedTitle></h2></div><button className="download-button" onClick={() => createReport(result, source)}>↓ Descargar reporte</button></header>

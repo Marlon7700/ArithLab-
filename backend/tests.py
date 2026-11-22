@@ -1,10 +1,17 @@
 import unittest
+import os
 
 from .lexer import tokenize
 from .main import compile_expression, CompileRequest
 
 
 class CompilerTests(unittest.TestCase):
+    def setUp(self):
+        self._gemini_key = os.environ.pop("GEMINI_API_KEY", None)
+
+    def tearDown(self):
+        if self._gemini_key is not None:
+            os.environ["GEMINI_API_KEY"] = self._gemini_key
     def test_precedence_and_unique_symbols(self):
         result = compile_expression(CompileRequest(source="10 + 25 * 10 - 4"))
         self.assertEqual(len(result["tokens"]), 7)
@@ -33,6 +40,16 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(result["resultado"], 14.84)
         self.assertEqual(result["pasos_resolucion"][0]["calculation"], "96 / 25 = 3.84")
         self.assertEqual(result["pasos_resolucion"][-1]["expression"], "14.84")
+
+    def test_zero_based_token_and_error_positions(self):
+        result = compile_expression(CompileRequest(source="7 $ 3 & 2", zero_based=True))
+        self.assertEqual(result["base_posiciones"], 0)
+        self.assertIn("posición 2", result["errores"][0])
+        self.assertIn("posición 6", result["errores"][1])
+
+        valid = compile_expression(CompileRequest(source="10 + 4", zero_based=True))
+        self.assertEqual(valid["tokens"][0]["position"], 0)
+        self.assertEqual(valid["tokens"][1]["position"], 3)
 
 
 if __name__ == "__main__":
