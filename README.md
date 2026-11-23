@@ -8,11 +8,12 @@ Simulador interactivo de un compilador aritmético para el proyecto final de Teo
 package.json       # comando único para frontend + backend
 models/             # ejemplos JSON del AST y respuesta de la API
 backend/
-  lexer.py       # tokens y errores léxicos
-  parser.py      # descenso recursivo y AST
-  semantic.py    # tablas, evaluación y código máquina de pila
-  main.py        # API POST /compilar
-  tests.py
+  lexico.py      # tokens y errores léxicos
+  sintactico.py  # descenso recursivo y AST
+  semantico.py   # tablas, evaluación y código máquina de pila
+  ia.py          # explicaciones de Gemini
+  principal.py   # API POST /compilar
+  pruebas.py
 frontend/
   src/App.jsx    # interfaz y flujo interactivo
   src/styles.css # tema oscuro, responsive y variables de diseño
@@ -48,7 +49,7 @@ python -m venv .venv
 # Windows:
 .venv\Scripts\activate
 pip install -r backend/requirements.txt
-python -m uvicorn backend.main:app --reload --port 8000
+python -m uvicorn backend.principal:app --reload --port 8000
 ```
 
 ### Frontend
@@ -82,7 +83,7 @@ Gemini se ejecuta únicamente en el backend. La clave nunca se coloca en React n
 ```powershell
 $env:GEMINI_API_KEY="PEGA_AQUI_TU_CLAVE"
 $env:GEMINI_MODEL="gemini-2.5-flash"
-python -m uvicorn backend.main:app --reload --port 8000
+python -m uvicorn backend.principal:app --reload --port 8000
 ```
 
 Para Render, agrega estas variables en **Environment**:
@@ -106,5 +107,5 @@ Si `GEMINI_API_KEY` no está configurada, el sistema sigue funcionando con las e
 Desde la raíz:
 
 ```bash
-python -m unittest backend.tests
+python -m unittest backend.pruebas
 ```

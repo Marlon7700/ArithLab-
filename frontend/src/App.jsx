@@ -11,17 +11,44 @@ const examples = [
   ["Con error", "7 $ 3 & 2"],
 ];
 
-const emptyResult = { tokens: [], ast: null, ast_text: "", simbolos: [], tipos: [], errores: [], resultado: null, codigo_maquina: [], pasos_resolucion: [], explicacion_ia: "", explicacion_semantica: "", explicacion_codigo_maquina: "", explicacion_error: "", explicacion_tokens: "", explicacion_ast: "", explicacion_tipos: "", explicacion_resultado: "", ia_error: "", modelo_ia: "pendiente", base_posiciones: 1 };
+const emptyResult = {
+  tokens: [],
+  ast: null,
+  ast_text: "",
+  simbolos: [],
+  tipos: [],
+  errores: [],
+  resultado: null,
+  codigo_maquina: [],
+  pasos_resolucion: [],
+  explicacion_ia: "",
+  explicacion_semantica: "",
+  explicacion_codigo_maquina: "",
+  explicacion_error: "",
+  explicacion_tokens: "",
+  explicacion_ast: "",
+  explicacion_tipos: "",
+  explicacion_resultado: "",
+  ia_error: "",
+  modelo_ia: "pendiente",
+  base_posiciones: 1,
+};
 
 // Reloj del navegador. Se envía a Gemini para que el saludo coincida con
 // la hora de quien usa el simulador, no con un texto fijo.
 function clientClock() {
   const now = new Date();
   const hour = now.getHours();
-  const saludo = hour < 12 ? "Buenos días" : hour < 19 ? "Buenas tardes" : "Buenas noches";
+  const saludo =
+    hour < 12 ? "Buenos días" : hour < 19 ? "Buenas tardes" : "Buenas noches";
   const momento = hour < 12 ? "mañana" : hour < 19 ? "tarde" : "noche";
   const fecha = now.toLocaleString("es-CO", {
-    weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   });
   return {
     label: `${saludo} · ${now.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}`,
@@ -57,7 +84,10 @@ function AstSvg({ node, activeToken }) {
   useEffect(() => setPositions({}), [node]);
   function flatten(current, start, end, depth, parent = null, path = "root") {
     if (!current) return;
-    const position = positions[path] || { x: (start + end) / 2, y: 38 + depth * 78 };
+    const position = positions[path] || {
+      x: (start + end) / 2,
+      y: 38 + depth * 78,
+    };
     const item = { ...current, x: position.x, y: position.y, parent, path };
     nodes.push(item);
     const leftLeaves = leafCount(current.left);
@@ -67,7 +97,10 @@ function AstSvg({ node, activeToken }) {
     flatten(current.right, split, end, depth + 1, item, `${path}.right`);
   }
   flatten(node, 30, svgWidth - 30, 0);
-  const height = Math.max(130, Math.max(...nodes.map((item) => item.y), 38) + 60);
+  const height = Math.max(
+    130,
+    Math.max(...nodes.map((item) => item.y), 38) + 60,
+  );
   const connections = nodes.filter((item) => item.parent);
   useEffect(() => {
     setConnectionStep(-1);
@@ -87,9 +120,10 @@ function AstSvg({ node, activeToken }) {
     };
     const speakNode = (connection, step, onFinished) => {
       const value = connection?.value;
-      const phrase = typeof value === "string"
-        ? `Nodo ${nodes.indexOf(connection) + 1}. Operador ${value}.`
-        : `Nodo ${nodes.indexOf(connection) + 1}. Número ${value}.`;
+      const phrase =
+        typeof value === "string"
+          ? `Nodo ${nodes.indexOf(connection) + 1}. Operador ${value}.`
+          : `Nodo ${nodes.indexOf(connection) + 1}. Número ${value}.`;
       if (!("speechSynthesis" in window)) {
         fallbackTimer = window.setTimeout(onFinished, 1400);
         return;
@@ -108,9 +142,10 @@ function AstSvg({ node, activeToken }) {
       window.speechSynthesis.speak(utterance);
     };
     const rootValue = node?.value;
-    const rootPhrase = typeof rootValue === "string"
-      ? `Nodo 1. Raíz, operador ${rootValue}.`
-      : `Nodo 1. Raíz, número ${rootValue}.`;
+    const rootPhrase =
+      typeof rootValue === "string"
+        ? `Nodo 1. Raíz, operador ${rootValue}.`
+        : `Nodo 1. Raíz, número ${rootValue}.`;
     const start = () => {
       if (connections.length === 0) {
         setIsBuilding(false);
@@ -143,12 +178,19 @@ function AstSvg({ node, activeToken }) {
     const scaleY = height / rect.height;
     const dx = (event.clientX - dragRef.current.clientX) * scaleX;
     const dy = (event.clientY - dragRef.current.clientY) * scaleY;
-    const movedPaths = nodes.filter((item) => item.path === dragRef.current.path || item.path.startsWith(`${dragRef.current.path}.`));
+    const movedPaths = nodes.filter(
+      (item) =>
+        item.path === dragRef.current.path ||
+        item.path.startsWith(`${dragRef.current.path}.`),
+    );
     setPositions((current) => {
       const next = { ...current };
       movedPaths.forEach((item) => {
         const currentPosition = current[item.path] || { x: item.x, y: item.y };
-        next[item.path] = { x: currentPosition.x + dx, y: currentPosition.y + dy };
+        next[item.path] = {
+          x: currentPosition.x + dx,
+          y: currentPosition.y + dy,
+        };
       });
       return next;
     });
@@ -161,112 +203,319 @@ function AstSvg({ node, activeToken }) {
   return (
     <div className="ast-3d-scene">
       <div className="ast-3d-grid" />
-      {isBuilding && <div className="ast-build-status">
-        <span className="ast-pulse" />
-        {connectionStep < 0
-          ? "Preparando conexiones..."
-          : connectionStep < connections.length
-            ? `Nodo ${nodes.indexOf(connections[connectionStep].parent) + 1} conectando a nodo ${nodes.indexOf(connections[connectionStep]) + 1} · voz IA activa`
-            : "Conexiones completas"}
-      </div>}
-      <svg className="ast-svg" viewBox={`0 0 ${svgWidth} ${height}`} role="img" aria-label="Árbol de sintaxis abstracta" onPointerMove={moveNode} onPointerUp={stopMoving} onPointerLeave={stopMoving}>
-      {connections.map((item, connectionIndex) => {
-        const isConnected = connectionIndex < connectionStep;
-        const isConnecting = connectionIndex === connectionStep;
-        const parentIndex = nodes.indexOf(item.parent);
-        const childIndex = nodes.indexOf(item);
-        const labelX = (item.parent.x + item.x) / 2;
-        const labelY = (item.parent.y + item.y) / 2 - 7;
-        return <g key={`connection-${item.path}`}>
-          <line pathLength="1" x1={item.parent.x} y1={item.parent.y + 23} x2={item.x} y2={item.y - 23} className={`ast-edge ${isConnecting ? "connecting" : isConnected ? "connected" : "pending"}`} />
-          {isConnecting && <text x={labelX} y={labelY} className="ast-connection-label">Nodo {parentIndex + 1} → Nodo {childIndex + 1}</text>}
-        </g>;
-      })}
-      {nodes.map((item) => {
-        const isOperator = typeof item.value === "string";
-        const active = activeToken !== null && String(item.value) === String(activeToken);
-        const nodeIndex = nodes.indexOf(item);
-        const parentConnection = item.parent ? connections.indexOf(item) : -1;
-        const assembled = !item.parent || parentConnection < connectionStep;
-        const connecting = parentConnection === connectionStep;
-        const nodeState = connecting ? "building" : assembled ? "assembled" : "waiting";
-        return <g key={item.path} className={`ast-node ${nodeState}${active ? " active" : ""}`} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); dragRef.current = { path: item.path, clientX: event.clientX, clientY: event.clientY }; }} >
-          <circle cx={item.x} cy={item.y} r="23" className={isOperator ? "operator-node" : "number-node"} style={{ animationDelay: `${nodeIndex * 140}ms` }} />
-          <text x={item.x} y={item.y + 5} textAnchor="middle" style={{ animationDelay: `${nodeIndex * 140 + 180}ms` }}>{item.value}</text>
-          <text x={item.x} y={item.y + 39} textAnchor="middle" className="ast-node-id" style={{ animationDelay: `${nodeIndex * 140 + 260}ms` }}>N{nodeIndex + 1}</text>
-        </g>;
-      })}
+      {isBuilding && (
+        <div className="ast-build-status">
+          <span className="ast-pulse" />
+          {connectionStep < 0
+            ? "Preparando conexiones..."
+            : connectionStep < connections.length
+              ? `Nodo ${nodes.indexOf(connections[connectionStep].parent) + 1} conectando a nodo ${nodes.indexOf(connections[connectionStep]) + 1} · voz IA activa`
+              : "Conexiones completas"}
+        </div>
+      )}
+      <svg
+        className="ast-svg"
+        viewBox={`0 0 ${svgWidth} ${height}`}
+        role="img"
+        aria-label="Árbol de sintaxis abstracta"
+        onPointerMove={moveNode}
+        onPointerUp={stopMoving}
+        onPointerLeave={stopMoving}
+      >
+        {connections.map((item, connectionIndex) => {
+          const isConnected = connectionIndex < connectionStep;
+          const isConnecting = connectionIndex === connectionStep;
+          const parentIndex = nodes.indexOf(item.parent);
+          const childIndex = nodes.indexOf(item);
+          const labelX = (item.parent.x + item.x) / 2;
+          const labelY = (item.parent.y + item.y) / 2 - 7;
+          return (
+            <g key={`connection-${item.path}`}>
+              <line
+                pathLength="1"
+                x1={item.parent.x}
+                y1={item.parent.y + 23}
+                x2={item.x}
+                y2={item.y - 23}
+                className={`ast-edge ${isConnecting ? "connecting" : isConnected ? "connected" : "pending"}`}
+              />
+              {isConnecting && (
+                <text x={labelX} y={labelY} className="ast-connection-label">
+                  Nodo {parentIndex + 1} → Nodo {childIndex + 1}
+                </text>
+              )}
+            </g>
+          );
+        })}
+        {nodes.map((item) => {
+          const isOperator = typeof item.value === "string";
+          const active =
+            activeToken !== null && String(item.value) === String(activeToken);
+          const nodeIndex = nodes.indexOf(item);
+          const parentConnection = item.parent ? connections.indexOf(item) : -1;
+          const assembled = !item.parent || parentConnection < connectionStep;
+          const connecting = parentConnection === connectionStep;
+          const nodeState = connecting
+            ? "building"
+            : assembled
+              ? "assembled"
+              : "waiting";
+          return (
+            <g
+              key={item.path}
+              className={`ast-node ${nodeState}${active ? " active" : ""}`}
+              onPointerDown={(event) => {
+                event.currentTarget.setPointerCapture(event.pointerId);
+                dragRef.current = {
+                  path: item.path,
+                  clientX: event.clientX,
+                  clientY: event.clientY,
+                };
+              }}
+            >
+              <circle
+                cx={item.x}
+                cy={item.y}
+                r="23"
+                className={isOperator ? "operator-node" : "number-node"}
+                style={{ animationDelay: `${nodeIndex * 140}ms` }}
+              />
+              <text
+                x={item.x}
+                y={item.y + 5}
+                textAnchor="middle"
+                style={{ animationDelay: `${nodeIndex * 140 + 180}ms` }}
+              >
+                {item.value}
+              </text>
+              <text
+                x={item.x}
+                y={item.y + 39}
+                textAnchor="middle"
+                className="ast-node-id"
+                style={{ animationDelay: `${nodeIndex * 140 + 260}ms` }}
+              >
+                N{nodeIndex + 1}
+              </text>
+            </g>
+          );
+        })}
       </svg>
-      <span className="ast-depth-label">{isBuilding ? "AST / CONSTRUYENDO" : "AST / ARRASTRA LAS BOLITAS"}</span>
+      <span className="ast-depth-label">
+        {isBuilding ? "AST / CONSTRUYENDO" : "AST / ARRASTRA LAS BOLITAS"}
+      </span>
     </div>
   );
 }
 
 function Metric({ label, value, tone = "" }) {
-  return <div className="metric-card"><span>{label}</span><strong className={tone}>{value}</strong></div>;
+  return (
+    <div className="metric-card">
+      <span>{label}</span>
+      <strong className={tone}>{value}</strong>
+    </div>
+  );
 }
 
 function AnimatedTitle({ children }) {
-  return <span className="animated-title" aria-label={children}>
-    {Array.from(children).map((character, index) => (
-      <span className="animated-title-letter" style={{ animationDelay: `${index * 55}ms` }} key={`${character}-${index}`}>
-        {character === " " ? "\u00a0" : character}
-      </span>
-    ))}
-  </span>;
+  return (
+    <span className="animated-title" aria-label={children}>
+      {Array.from(children).map((character, index) => (
+        <span
+          className="animated-title-letter"
+          style={{ animationDelay: `${index * 55}ms` }}
+          key={`${character}-${index}`}
+        >
+          {character === " " ? "\u00a0" : character}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 function BrandIcon() {
-  return <svg className="brand-icon" viewBox="0 0 64 64" role="img" aria-label="Icono de ArithLab">
-    <defs>
-      <linearGradient id="brand-flask-gradient" x1="10" y1="8" x2="54" y2="58">
-        <stop offset="0" stopColor="#5edbff" />
-        <stop offset=".52" stopColor="#bd9cff" />
-        <stop offset="1" stopColor="#f6dfa3" />
-      </linearGradient>
-      <filter id="brand-icon-glow"><feGaussianBlur stdDeviation="1.8" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
-    </defs>
-    <g fill="none" stroke="url(#brand-flask-gradient)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" filter="url(#brand-icon-glow)">
-      <path d="M25 8h14M29 8v17L14 49c-2 4 1 7 6 7h24c5 0 8-3 6-7L35 25V8" />
-      <path d="M18 45c6-4 9 3 14-1s8-5 14 0" opacity=".8" />
-    </g>
-    <g fill="#bd9cff" stroke="#f7f8ff" strokeWidth="1.2">
-      <circle cx="27" cy="37" r="3.2" /><circle cx="37" cy="31" r="3.2" /><circle cx="42" cy="43" r="3.2" />
-    </g>
-    <path d="M27 37l10-6 5 12" fill="none" stroke="#5edbff" strokeWidth="1.4" opacity=".9" />
-    <path d="M50 12v12M44 18h12" stroke="#f6dfa3" strokeWidth="2.5" strokeLinecap="round" />
-  </svg>;
+  return (
+    <svg
+      className="brand-icon"
+      viewBox="0 0 64 64"
+      role="img"
+      aria-label="Icono de ArithLab"
+    >
+      <defs>
+        <linearGradient
+          id="brand-flask-gradient"
+          x1="10"
+          y1="8"
+          x2="54"
+          y2="58"
+        >
+          <stop offset="0" stopColor="#5edbff" />
+          <stop offset=".52" stopColor="#bd9cff" />
+          <stop offset="1" stopColor="#f6dfa3" />
+        </linearGradient>
+        <filter id="brand-icon-glow">
+          <feGaussianBlur stdDeviation="1.8" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+      <g
+        fill="none"
+        stroke="url(#brand-flask-gradient)"
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        filter="url(#brand-icon-glow)"
+      >
+        <path d="M25 8h14M29 8v17L14 49c-2 4 1 7 6 7h24c5 0 8-3 6-7L35 25V8" />
+        <path d="M18 45c6-4 9 3 14-1s8-5 14 0" opacity=".8" />
+      </g>
+      <g fill="#bd9cff" stroke="#f7f8ff" strokeWidth="1.2">
+        <circle cx="27" cy="37" r="3.2" />
+        <circle cx="37" cy="31" r="3.2" />
+        <circle cx="42" cy="43" r="3.2" />
+      </g>
+      <path
+        d="M27 37l10-6 5 12"
+        fill="none"
+        stroke="#5edbff"
+        strokeWidth="1.4"
+        opacity=".9"
+      />
+      <path
+        d="M50 12v12M44 18h12"
+        stroke="#f6dfa3"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
 }
 
 function Table({ title, headers, rows, empty = "Sin datos todavía" }) {
-  return <div className="panel table-panel">
-    <div className="panel-heading"><h3>{title}</h3><span className="section-index">●</span></div>
-    <div className="table-responsive"><table><thead><tr>{headers.map((header) => <th key={header}>{header}</th>)}</tr></thead>
-      <tbody>{rows.length ? rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>) : <tr><td colSpan={headers.length} className="empty">{empty}</td></tr>}</tbody>
-    </table></div>
-  </div>;
+  return (
+    <div className="panel table-panel">
+      <div className="panel-heading">
+        <h3>{title}</h3>
+        <span className="section-index">●</span>
+      </div>
+      <div className="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              {headers.map((header) => (
+                <th key={header}>{header}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length ? (
+              rows.map((row, index) => (
+                <tr key={index}>
+                  {row.map((cell, cellIndex) => (
+                    <td key={cellIndex}>{cell}</td>
+                  ))}
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={headers.length} className="empty">
+                  {empty}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 function createReport(result, source) {
-  const rows = result.tokens.map((token, index) => `<tr><td>${index + 1}</td><td>${token.type}</td><td>${token.value}</td></tr>`).join("");
-  const symbols = result.simbolos.map((item) => `<tr><td>${item.symbol}</td><td>${item.address}</td></tr>`).join("");
-  const types = result.tipos.map((item) => `<tr><td>${item.symbol}</td><td>${item.type}</td></tr>`).join("");
-  const errors = result.errores.length ? `<section class="error"><h2>Errores</h2>${result.errores.map((error) => `<p>${error}</p>`).join("")}</section>` : "";
-  function reportAstSvg(current, x, y, gap, lines = [], circles = [], path = "root") {
+  const rows = result.tokens
+    .map(
+      (token, index) =>
+        `<tr><td>${index + 1}</td><td>${token.type}</td><td>${token.value}</td></tr>`,
+    )
+    .join("");
+  const symbols = result.simbolos
+    .map((item) => `<tr><td>${item.symbol}</td><td>${item.address}</td></tr>`)
+    .join("");
+  const types = result.tipos
+    .map((item) => `<tr><td>${item.symbol}</td><td>${item.type}</td></tr>`)
+    .join("");
+  const errors = result.errores.length
+    ? `<section class="error"><h2>Errores</h2>${result.errores.map((error) => `<p>${error}</p>`).join("")}</section>`
+    : "";
+  function reportAstSvg(
+    current,
+    x,
+    y,
+    gap,
+    lines = [],
+    circles = [],
+    path = "root",
+  ) {
     if (!current) return { lines, circles };
-    circles.push(`<circle cx="${x}" cy="${y}" r="22" class="${typeof current.value === "string" ? "op" : "num"}"/><text x="${x}" y="${y + 5}" text-anchor="middle">${current.value}</text>`);
-    if (current.left) { lines.push(`<line x1="${x}" y1="${y + 22}" x2="${x - gap}" y2="${y + 78 - 22}"/>`); reportAstSvg(current.left, x - gap, y + 78, Math.max(28, gap / 1.8), lines, circles, `${path}.left`); }
-    if (current.right) { lines.push(`<line x1="${x}" y1="${y + 22}" x2="${x + gap}" y2="${y + 78 - 22}"/>`); reportAstSvg(current.right, x + gap, y + 78, Math.max(28, gap / 1.8), lines, circles, `${path}.right`); }
+    circles.push(
+      `<circle cx="${x}" cy="${y}" r="22" class="${typeof current.value === "string" ? "op" : "num"}"/><text x="${x}" y="${y + 5}" text-anchor="middle">${current.value}</text>`,
+    );
+    if (current.left) {
+      lines.push(
+        `<line x1="${x}" y1="${y + 22}" x2="${x - gap}" y2="${y + 78 - 22}"/>`,
+      );
+      reportAstSvg(
+        current.left,
+        x - gap,
+        y + 78,
+        Math.max(28, gap / 1.8),
+        lines,
+        circles,
+        `${path}.left`,
+      );
+    }
+    if (current.right) {
+      lines.push(
+        `<line x1="${x}" y1="${y + 22}" x2="${x + gap}" y2="${y + 78 - 22}"/>`,
+      );
+      reportAstSvg(
+        current.right,
+        x + gap,
+        y + 78,
+        Math.max(28, gap / 1.8),
+        lines,
+        circles,
+        `${path}.right`,
+      );
+    }
     return { lines, circles };
   }
-  const reportTree = result.ast ? reportAstSvg(result.ast, 300, 35, 155) : { lines: [], circles: [] };
-  const summary = asHtml(result.explicacion_ia) || "Gemini todavía no ha explicado esta fórmula.";
-  const resolution = (result.pasos_resolucion || []).map((step, index) => `<p><b>${index + 1}. ${step.priority === "prioritaria" ? "Operación prioritaria" : "Operación de izquierda a derecha"}:</b> ${step.calculation}<br>La expresión queda: <code>${step.expression}</code></p>`).join("");
-  const semanticExplanation = asHtml(result.explicacion_semantica) || "Gemini todavía no ha explicado la tabla semántica.";
-  const machineExplanation = asHtml(result.explicacion_codigo_maquina) || "Gemini todavía no ha explicado el código máquina.";
-  const machineSteps = (result.codigo_maquina || []).map((instruction, index) => (
-    `<tr><td>${String(index + 1).padStart(2, "0")}</td><td><code>${instruction}</code></td></tr>`
-  )).join("");
+  const reportTree = result.ast
+    ? reportAstSvg(result.ast, 300, 35, 155)
+    : { lines: [], circles: [] };
+  const summary =
+    asHtml(result.explicacion_ia) ||
+    "Gemini todavía no ha explicado esta fórmula.";
+  const resolution = (result.pasos_resolucion || [])
+    .map(
+      (step, index) =>
+        `<p><b>${index + 1}. ${step.priority === "prioritaria" ? "Operación prioritaria" : "Operación de izquierda a derecha"}:</b> ${step.calculation}<br>La expresión queda: <code>${step.expression}</code></p>`,
+    )
+    .join("");
+  const semanticExplanation =
+    asHtml(result.explicacion_semantica) ||
+    "Gemini todavía no ha explicado la tabla semántica.";
+  const machineExplanation =
+    asHtml(result.explicacion_codigo_maquina) ||
+    "Gemini todavía no ha explicado el código máquina.";
+  const machineSteps = (result.codigo_maquina || [])
+    .map(
+      (instruction, index) =>
+        `<tr><td>${String(index + 1).padStart(2, "0")}</td><td><code>${instruction}</code></td></tr>`,
+    )
+    .join("");
   const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Reporte ArithLab+</title>
     <style>
       *{box-sizing:border-box}@page{size:A4;margin:14mm}body{font-family:Arial,sans-serif;color:#202124;margin:0;background:white}main{padding:28px 38px}.brand{border-bottom:2px solid #d8ba78;padding-bottom:14px;margin-bottom:22px}h1{color:#604c2d;margin:0 0 5px;font-family:Georgia,serif}h2{color:#604c2d;border-bottom:1px solid #dfd3b8;padding-bottom:7px;margin:24px 0 12px;font-size:18px}.formula{font:18px monospace;background:#f8f2e7;border-left:4px solid #c6a665;padding:15px;border-radius:7px}.step-badge{display:inline-block;background:#604c2d;color:white;border-radius:20px;padding:5px 9px;font-size:11px;margin-right:8px}p,td,th{font-size:12px;line-height:1.6}table{border-collapse:collapse;width:100%;margin-bottom:16px}th{background:#604c2d;color:white}td,th{padding:9px;border:1px solid #ddd;text-align:left}.note{background:#f4f7ff;border:1px solid #bbc7df;border-radius:8px;padding:13px}.error{color:#a7353c;background:#fff0f0;border:1px solid #e6a4a8;padding:14px;border-radius:8px}.report-ast{width:100%;height:430px;background:#171718;border-radius:12px;border:1px solid #ddd}.report-ast line{stroke:#777;stroke-width:1.5}.report-ast circle{fill:#202022;stroke-width:2}.report-ast .num{stroke:#c79b42}.report-ast .op{stroke:#806bb0}.report-ast text{fill:white;font:14px monospace}.ast-text{background:#202124;color:#f4dfb0;border-radius:8px;padding:14px;white-space:pre-wrap;font:12px monospace}.resolution p{margin:7px 0}.result-box{background:#edf8f1;border:2px solid #6da785;border-radius:10px;padding:18px}.result-box strong{display:block;color:#28724a;font:700 34px monospace;margin-top:5px}@media print{main{padding:20px}.report-ast{break-inside:avoid}}
@@ -303,31 +552,44 @@ function createReport(result, source) {
       <div class="result-box">Resultado obtenido<strong>${result.resultado ?? "No disponible"}</strong></div>
     </main><script>window.onload=()=>window.print()</script></body></html>`;
   const reportWindow = window.open("", "_blank");
-  if (reportWindow) { reportWindow.document.write(html); reportWindow.document.close(); }
+  if (reportWindow) {
+    reportWindow.document.write(html);
+    reportWindow.document.close();
+  }
 }
 
 function downloadSectionReport(section, result, source) {
-  const content = {
-    Entrada: `<h2>Entrada</h2><p class="formula">${source || "(entrada vacía)"}</p>`,
-    Tokens: `<h2>Tokens identificados</h2><table><tr><th>N.º</th><th>Tipo</th><th>Valor</th></tr>${result.tokens.map((token, index) => `<tr><td>${index + 1}</td><td>${token.type}</td><td>${token.value}</td></tr>`).join("")}</table>`,
-    AST: `<h2>Árbol de Sintaxis Abstracta</h2><pre>${result.ast_text || "No generado"}</pre><p>${asHtml(result.explicacion_ia) || "Compila para que Gemini explique el árbol y la fórmula."}</p>`,
-    Semántica: `<h2>Tabla semántica</h2><table><tr><th>Símbolo</th><th>Dirección</th></tr>${result.simbolos.map((item) => `<tr><td>${item.symbol}</td><td>${item.address}</td></tr>`).join("")}</table><p>${asHtml(result.explicacion_semantica) || "Compila para que Gemini explique cada símbolo."}</p>`,
-    Construcción: `<h2>Construcción paso a paso</h2>${(result.pasos_resolucion || []).map((stepItem, index) => `<p><b>${index + 1}.</b> ${stepItem.calculation}<br>Expresión: <code>${stepItem.expression}</code></p>`).join("")}<p>${asHtml(result.explicacion_ia)}</p>`,
-    Tipos: `<h2>Tabla de tipos</h2><table><tr><th>Símbolo</th><th>Tipo</th></tr>${result.tipos.map((item) => `<tr><td>${item.symbol}</td><td>${item.type}</td></tr>`).join("")}</table><p>${asHtml(result.explicacion_semantica)}</p>`,
-    "Código máquina": `<h2>Código máquina</h2><table><tr><th>N.º</th><th>Instrucción</th></tr>${(result.codigo_maquina || []).map((instruction, index) => `<tr><td>${index + 1}</td><td><code>${instruction}</code></td></tr>`).join("")}</table><p>${asHtml(result.explicacion_codigo_maquina) || "Compila para que Gemini explique cada instrucción."}</p>`,
-    Resultado: `<h2>Resultado final</h2><p><strong>${result.resultado ?? "No disponible"}</strong></p>`,
-    Tablas: `<h2>Tabla de símbolos</h2><table><tr><th>Símbolo</th><th>Dirección</th></tr>${result.simbolos.map((item) => `<tr><td>${item.symbol}</td><td>${item.address}</td></tr>`).join("")}</table><h2>Tabla de tipos</h2><table><tr><th>Símbolo</th><th>Tipo</th></tr>${result.tipos.map((item) => `<tr><td>${item.symbol}</td><td>${item.type}</td></tr>`).join("")}</table>`,
-    Errores: `<h2>Errores detectados</h2>${result.errores.length ? result.errores.map((error) => `<p class="error">${error}</p>`).join("") : "<p>No hay errores. La expresión es válida.</p>"}<p>${asHtml(result.explicacion_error)}</p>`,
-    Teoría: `<h2>Fases del compilador</h2><ol><li>Léxico: convierte caracteres en tokens.</li><li>Sintáctico: construye el AST aplicando precedencia.</li><li>Semántico: crea símbolos y tipos.</li><li>Generación: produce código máquina de pila.</li></ol>`,
-  }[section] || "";
+  const content =
+    {
+      Entrada: `<h2>Entrada</h2><p class="formula">${source || "(entrada vacía)"}</p>`,
+      Tokens: `<h2>Tokens identificados</h2><table><tr><th>N.º</th><th>Tipo</th><th>Valor</th></tr>${result.tokens.map((token, index) => `<tr><td>${index + 1}</td><td>${token.type}</td><td>${token.value}</td></tr>`).join("")}</table>`,
+      AST: `<h2>Árbol de Sintaxis Abstracta</h2><pre>${result.ast_text || "No generado"}</pre><p>${asHtml(result.explicacion_ia) || "Compila para que Gemini explique el árbol y la fórmula."}</p>`,
+      Semántica: `<h2>Tabla semántica</h2><table><tr><th>Símbolo</th><th>Dirección</th></tr>${result.simbolos.map((item) => `<tr><td>${item.symbol}</td><td>${item.address}</td></tr>`).join("")}</table><p>${asHtml(result.explicacion_semantica) || "Compila para que Gemini explique cada símbolo."}</p>`,
+      Construcción: `<h2>Construcción paso a paso</h2>${(result.pasos_resolucion || []).map((stepItem, index) => `<p><b>${index + 1}.</b> ${stepItem.calculation}<br>Expresión: <code>${stepItem.expression}</code></p>`).join("")}<p>${asHtml(result.explicacion_ia)}</p>`,
+      Tipos: `<h2>Tabla de tipos</h2><table><tr><th>Símbolo</th><th>Tipo</th></tr>${result.tipos.map((item) => `<tr><td>${item.symbol}</td><td>${item.type}</td></tr>`).join("")}</table><p>${asHtml(result.explicacion_semantica)}</p>`,
+      "Código máquina": `<h2>Código máquina</h2><table><tr><th>N.º</th><th>Instrucción</th></tr>${(result.codigo_maquina || []).map((instruction, index) => `<tr><td>${index + 1}</td><td><code>${instruction}</code></td></tr>`).join("")}</table><p>${asHtml(result.explicacion_codigo_maquina) || "Compila para que Gemini explique cada instrucción."}</p>`,
+      Resultado: `<h2>Resultado final</h2><p><strong>${result.resultado ?? "No disponible"}</strong></p>`,
+      Tablas: `<h2>Tabla de símbolos</h2><table><tr><th>Símbolo</th><th>Dirección</th></tr>${result.simbolos.map((item) => `<tr><td>${item.symbol}</td><td>${item.address}</td></tr>`).join("")}</table><h2>Tabla de tipos</h2><table><tr><th>Símbolo</th><th>Tipo</th></tr>${result.tipos.map((item) => `<tr><td>${item.symbol}</td><td>${item.type}</td></tr>`).join("")}</table>`,
+      Errores: `<h2>Errores detectados</h2>${result.errores.length ? result.errores.map((error) => `<p class="error">${error}</p>`).join("") : "<p>No hay errores. La expresión es válida.</p>"}<p>${asHtml(result.explicacion_error)}</p>`,
+      Teoría: `<h2>Fases del compilador</h2><ol><li>Léxico: convierte caracteres en tokens.</li><li>Sintáctico: construye el AST aplicando precedencia.</li><li>Semántico: crea símbolos y tipos.</li><li>Generación: produce código máquina de pila.</li></ol>`,
+    }[section] || "";
   const reportWindow = window.open("", "_blank");
   if (!reportWindow) return;
-  reportWindow.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${section} - ArithLab+</title><style>body{font-family:Arial;color:#202124;margin:38px}h1{color:#8e6e3a}h2{border-bottom:2px solid #d5b77b;padding-bottom:7px;color:#604c2d}table{border-collapse:collapse;width:100%}td,th{padding:9px;border:1px solid #ddd;text-align:left}th{background:#604c2d;color:white}.formula{font:18px monospace;background:#f8f2e7;padding:15px}.error{color:#a7353c;background:#fff0f0;padding:12px}</style></head><body><h1>ArithLab+ · ${section}</h1><p class="formula">${source || "(entrada vacía)"}</p>${content}<script>window.onload=()=>window.print()</script></body></html>`);
+  reportWindow.document.write(
+    `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${section} - ArithLab+</title><style>body{font-family:Arial;color:#202124;margin:38px}h1{color:#8e6e3a}h2{border-bottom:2px solid #d5b77b;padding-bottom:7px;color:#604c2d}table{border-collapse:collapse;width:100%}td,th{padding:9px;border:1px solid #ddd;text-align:left}th{background:#604c2d;color:white}.formula{font:18px monospace;background:#f8f2e7;padding:15px}.error{color:#a7353c;background:#fff0f0;padding:12px}</style></head><body><h1>ArithLab+ · ${section}</h1><p class="formula">${source || "(entrada vacía)"}</p>${content}<script>window.onload=()=>window.print()</script></body></html>`,
+  );
   reportWindow.document.close();
 }
 
 function SectionDownload({ section, result, source }) {
-  return <button className="download-button section-download" onClick={() => downloadSectionReport(section, result, source)}>↓ Descargar {section}</button>;
+  return (
+    <button
+      className="download-button section-download"
+      onClick={() => downloadSectionReport(section, result, source)}
+    >
+      ↓ Descargar {section}
+    </button>
+  );
 }
 
 export default function App() {
@@ -351,7 +613,9 @@ export default function App() {
   const hasErrors = result.errores.length > 0;
   const processText = geminiListo ? result.explicacion_ia : "";
   const semanticExplanation = geminiListo ? result.explicacion_semantica : "";
-  const machineExplanation = geminiListo ? result.explicacion_codigo_maquina : "";
+  const machineExplanation = geminiListo
+    ? result.explicacion_codigo_maquina
+    : "";
   const tokenExplanation = geminiListo ? result.explicacion_tokens : "";
   const astExplanation = geminiListo ? result.explicacion_ast : "";
   const typesExplanation = geminiListo ? result.explicacion_tipos : "";
@@ -393,11 +657,17 @@ export default function App() {
       const response = await fetch(`${API_URL}/compilar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source, zero_based: zeroBased, hora_cliente: horaCliente }),
+        body: JSON.stringify({
+          source,
+          zero_based: zeroBased,
+          hora_cliente: horaCliente,
+        }),
       });
       if (!response.ok) {
         const detail = await response.text();
-        throw new Error(`HTTP ${response.status}${detail ? `: ${detail.slice(0, 120)}` : ""}`);
+        throw new Error(
+          `HTTP ${response.status}${detail ? `: ${detail.slice(0, 120)}` : ""}`,
+        );
       }
       const compiled = await response.json();
       if (explainRequest.current !== requestId) return;
@@ -416,7 +686,9 @@ export default function App() {
       });
       if (!compiled.ast && !compiled.errores.length) return;
       setAiLoading(true);
-      const endpoint = compiled.errores.length ? "/explicar-error" : "/explicar";
+      const endpoint = compiled.errores.length
+        ? "/explicar-error"
+        : "/explicar";
       const controller = new AbortController();
       explainAbort.current = controller;
       const timeout = window.setTimeout(() => controller.abort(), 30000);
@@ -424,7 +696,11 @@ export default function App() {
         const aiResponse = await fetch(`${API_URL}${endpoint}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ source, zero_based: zeroBased, hora_cliente: horaCliente }),
+          body: JSON.stringify({
+            source,
+            zero_based: zeroBased,
+            hora_cliente: horaCliente,
+          }),
           signal: controller.signal,
         });
         const improved = aiResponse.ok ? await aiResponse.json() : null;
@@ -435,7 +711,8 @@ export default function App() {
             ...current,
             explicacion_ia: improved.explicacion_ia || "",
             explicacion_semantica: improved.explicacion_semantica || "",
-            explicacion_codigo_maquina: improved.explicacion_codigo_maquina || "",
+            explicacion_codigo_maquina:
+              improved.explicacion_codigo_maquina || "",
             explicacion_error: improved.explicacion_error || "",
             explicacion_tokens: improved.explicacion_tokens || "",
             explicacion_ast: improved.explicacion_ast || "",
@@ -448,7 +725,9 @@ export default function App() {
           setResult((current) => ({
             ...current,
             modelo_ia: "error",
-            ia_error: improved?.ia_error || "Gemini no respondió. Vuelve a compilar la fórmula.",
+            ia_error:
+              improved?.ia_error ||
+              "Gemini no respondió. Vuelve a compilar la fórmula.",
           }));
         }
       } catch {
@@ -456,7 +735,8 @@ export default function App() {
         setResult((current) => ({
           ...current,
           modelo_ia: "error",
-          ia_error: "Gemini tardó demasiado o no hubo conexión. Vuelve a compilar.",
+          ia_error:
+            "Gemini tardó demasiado o no hubo conexión. Vuelve a compilar.",
         }));
       } finally {
         window.clearTimeout(timeout);
@@ -464,20 +744,37 @@ export default function App() {
       }
     } catch (error) {
       if (explainRequest.current === requestId) {
-        setResult({ ...emptyResult, errores: [`Backend no disponible. Ejecuta: python -m uvicorn backend.main:app --reload --port 8000 (${error.message})`] });
+        setResult({
+          ...emptyResult,
+          errores: [
+            `Backend no disponible. Ejecuta: python -m uvicorn backend.principal:app --reload --port 8000 (${error.message})`,
+          ],
+        });
       }
     } finally {
       if (explainRequest.current === requestId) setLoading(false);
     }
   }
 
-  const metrics = useMemo(() => ({
-    tokens: result.tokens.length,
-    symbols: result.simbolos.length,
-    nodes: countNodes(result.ast),
-    status: result.errores.length ? "Error" : result.ast ? "Listo" : "—",
-  }), [result]);
-  const pipeline = ["Entrada", "Tokens", "AST", "Semántica", "Construcción", "Tipos", "Código", "Resultado"];
+  const metrics = useMemo(
+    () => ({
+      tokens: result.tokens.length,
+      symbols: result.simbolos.length,
+      nodes: countNodes(result.ast),
+      status: result.errores.length ? "Error" : result.ast ? "Listo" : "—",
+    }),
+    [result],
+  );
+  const pipeline = [
+    "Entrada",
+    "Tokens",
+    "AST",
+    "Semántica",
+    "Construcción",
+    "Tipos",
+    "Código",
+    "Resultado",
+  ];
   const stepMenu = [
     ["Entrada", "entrada-step", "▦"],
     ["Tokens", "tokens-step", "⌘"],
@@ -493,7 +790,9 @@ export default function App() {
     setStep(entry);
     setSection("Simulador");
     window.setTimeout(() => {
-      document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document
+        .getElementById(targetId)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 40);
     downloadSectionReport(label, result, source);
   }
@@ -502,73 +801,565 @@ export default function App() {
     setStep(bounded);
     setSection("Simulador");
     window.setTimeout(() => {
-      document.getElementById(stepMenu[bounded][1])?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document
+        .getElementById(stepMenu[bounded][1])
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 40);
   }
 
-  return <div className="app-shell">
-    <aside className="sidebar">
-      <div className="brand"><div className="brand-mark"><BrandIcon /></div><div><h1>ArithLab<span>+</span></h1><p>Tokeniza. Parsea.<br />Entiende.</p></div></div>
-      <nav>{stepMenu.map(([item, targetId, icon], index) => <button key={item} className={step === index ? "nav-item active" : "nav-item"} onClick={() => openStep(item, targetId)}><span className="nav-icon nav-step-icon" aria-hidden="true">{icon}</span><span className="nav-step-number">{String(index + 1).padStart(2, "0")}</span><span>{item}</span></button>)}</nav>
-      <div className="sidebar-tools"><button className={section === "Errores" ? "nav-item active" : "nav-item"} onClick={() => setSection("Errores")}><span className="nav-icon" aria-hidden="true">⚠</span><span>Errores</span></button><button className={section === "Teoría" ? "nav-item active" : "nav-item"} onClick={() => setSection("Teoría")}><span className="nav-icon" aria-hidden="true">◈</span><span>Teoría</span></button></div>
-      <div className="sidebar-foot"><span className="status-dot" /> API Python conectable<br /><small>{aiLoading ? `✦ Consultando Gemini · ${clockLabel}` : `IA: ${result.modelo_ia || "pendiente"} · ${clockLabel}`}</small></div>
-    </aside>
-    <main className="main-content">
-      <header className="topbar"><div><p className="eyebrow">LABORATORIO / {section.toUpperCase()}</p><h2><AnimatedTitle>Simulador de compilador aritmético</AnimatedTitle></h2></div><button className="download-button" onClick={() => createReport(result, source)}>↓ Descargar reporte</button></header>
-      <section className="metrics"><Metric label="Tokens" value={metrics.tokens.toString().padStart(2, "0")} /><Metric label="Operandos únicos" value={metrics.symbols.toString().padStart(2, "0")} /><Metric label="Nodos del AST" value={metrics.nodes.toString().padStart(2, "0")} /><Metric label="Estado" value={metrics.status} tone={hasErrors ? "error-text" : "success-text"} /></section>
-      <section className="pipeline panel"><div className="pipeline-line">{pipeline.map((item, index) => <button key={item} className={index <= step ? "pipeline-stage reached" : "pipeline-stage"} onClick={() => moveStep(index)}><span>{String(index + 1).padStart(2, "0")}</span><b>{item}</b>{index < pipeline.length - 1 && <i />}</button>)}</div><div className="step-controls"><span>Modo paso a paso</span><button onClick={() => moveStep(step - 1)}>←</button><button onClick={() => moveStep(step + 1)}>→</button></div></section>
-      {section !== "Simulador" && <section className="section-view panel">
-        <div className="section-view-header"><div><span className="kicker">VISTA / {section.toUpperCase()}</span><h3>{section === "Teoría" ? "Guía de teoría de compiladores" : `Resultados de ${section}`}</h3></div><SectionDownload section={section} result={result} source={source} /></div>
-        {section === "Errores" && <div className="error-view">{result.errores.length ? <>
-          {result.errores.map((error) => <div className="error-box" key={error}>{error}</div>)}
-          <div className="panel ai-error-explanation"><div className="panel-heading"><div><span className="kicker">ANÁLISIS IA DEL ERROR</span><h3>Por qué ocurrió el error</h3></div><span className="ai-badge">{aiLoading ? "✦ CONSULTANDO GEMINI" : geminiListo ? `✦ ${result.modelo_ia}` : "✦ GEMINI"}</span></div><pre className="semantic-process">{aiLoading ? aiWait : (result.explicacion_error || result.ia_error || "Compila una fórmula con error para que Gemini la explique.")}</pre></div>
-        </> : <div className="success-box">No hay errores. La expresión es válida.</div>}</div>}
-        {section === "Teoría" && <div className="theory-view"><article><h4>1. Análisis léxico</h4><p>Lee la fórmula, ignora espacios y reconoce números y operadores válidos. Los caracteres desconocidos se reportan con su posición.</p></article><article><h4>2. Análisis sintáctico</h4><p>El parser de descenso recursivo aplica precedencia: primero multiplicación/división y luego suma/resta. Las operaciones iguales se agrupan de izquierda a derecha.</p></article><article><h4>3. Semántica y código máquina</h4><p>Los números únicos reciben direcciones simuladas y el AST se traduce a instrucciones PUSH, ADD, SUB, MUL, DIV y STORE R0.</p></article></div>}
-      </section>}
-      {section === "Simulador" && <>
-      <section id="entrada-step" className="panel input-panel"><div className="panel-heading"><div><span className="kicker">01 / ENTRADA</span><h3>Escribe tu expresión</h3></div><span className="live-badge"><span /> EN VIVO</span></div>
-          <textarea value={source} onChange={(event) => setSource(event.target.value)} aria-label="Expresión aritmética" placeholder="Ej. 10 + 25 * 10 - 4" />
-          <div className="quick-examples"><span>Ejemplos rápidos</span>{examples.map(([label, value]) => <button key={label} onClick={() => setSource(value)}>{label}</button>)}</div>
-          <div className="input-actions"><button className="compile-button" onClick={compile} disabled={loading}>{loading ? "Compilando..." : "Compilar expresión  →"}</button><label className="switch-label"><input type="checkbox" checked={zeroBased} onChange={(e) => setZeroBased(e.target.checked)} /><span className="switch" /> Posiciones desde {zeroBased ? "0" : "1"}</label></div>
-          {hasErrors && <div className="error-box"><strong>! Se encontraron {result.errores.length} error{result.errores.length > 1 ? "es" : ""}</strong>{result.errores.map((error) => <p key={error}>{error}</p>)}
-            <p className="error-ai"><b>Explicación IA:</b> {aiLoading ? aiWait : (result.explicacion_error || result.ia_error || "Gemini todavía no explica este error.")}</p>
-          </div>}
-      </section>
-      <section id="tokens-step" className="section-block"><div className="section-title"><span className="kicker">02 / LÉXICO</span><h3>Tokens identificados</h3></div><div className="token-list">{result.tokens.length ? result.tokens.map((token, index) => <button className={`token-chip ${token.type === "NÚMERO" ? "number-chip" : "operator-chip"}`} key={`${token.position}-${index}`} onMouseEnter={() => setActiveToken(token.value)} onMouseLeave={() => setActiveToken(null)}><small>{String(index + 1).padStart(2, "0")}</small>{token.value}<em>{token.type}</em></button>) : <span className="muted">{hasErrors ? "No quedó una lista completa de tokens." : "Los tokens aparecerán después de compilar."}</span>}</div>{hasErrors && <pre className="semantic-process">{aiLoading ? aiWait : (tokenExplanation || result.ia_error || "Gemini explicará qué caracteres no pudieron ser token.")}</pre>}</section>
-      <section id="ast-step" className="panel ast-panel"><div className="panel-heading"><div><span className="kicker">03 / SINTAXIS</span><h3>Árbol de sintaxis abstracta <span className="mini-tag">SVG</span></h3></div><span className="ast-legend"><i className="cream-dot" /> número <i className="lilac-dot" /> operador</span></div>
-        <div className="ast-stage">{result.ast ? <AstSvg node={result.ast} activeToken={activeToken} /> : <div className="empty-ast"><div>⌁</div><p>{hasErrors ? "El AST no se construyó" : "El AST aparecerá aquí"}</p><small>{hasErrors ? "El parser se detiene porque la fórmula tiene errores." : "Compila una expresión para visualizar su estructura."}</small></div>}</div>
-        <pre className="ast-text">{result.ast_text || (hasErrors ? (aiLoading ? aiWait : (astExplanation || result.ia_error || "Gemini explicará por qué no hay árbol.")) : "└── esperando entrada...")}</pre>
-        {(result.ast || hasErrors) && <pre className="semantic-process ast-why">{aiLoading ? aiWait : (astExplanation || result.ia_error || "Gemini explicará por qué el árbol queda con esta forma.")}</pre>}
-      </section>
-      <section id="semantic-step" className="semantic-grid">
-        <Table title="04 / Tabla semántica" headers={["Símbolo", "Dirección"]} rows={result.simbolos.map((item) => [item.symbol, <code>{item.address}</code>])} empty={hasErrors ? "Sin símbolos: el análisis no llegó a esta fase." : "Sin datos todavía"} />
-        <div className="panel semantic-explanation"><div className="panel-heading"><div><span className="kicker">04 / ANÁLISIS SEMÁNTICO</span><h3>Cómo se construyó la tabla</h3></div><span className="ai-badge">{aiLoading ? "✦ CONSULTANDO GEMINI" : geminiListo ? `✦ ${result.modelo_ia}` : "✦ GEMINI"}</span></div>
-          <div className="formula-banner"><span>FÓRMULA</span><code>{source || "—"}</code></div>
-          <pre className="semantic-process">{aiLoading ? aiWait : (semanticExplanation || result.ia_error || "Compila una expresión para que Gemini explique cada símbolo, su dirección y su tipo.")}</pre>
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brand-mark">
+            <BrandIcon />
+          </div>
+          <div>
+            <h1>
+              ArithLab<span>+</span>
+            </h1>
+            <p>
+              Tokeniza. Parsea.
+              <br />
+              Entiende.
+            </p>
+          </div>
         </div>
-      </section>
-      <section id="construction-step" className="panel process-panel"><div className="panel-heading"><div><span className="kicker">05 / EJECUCIÓN GUIADA</span><h3>Cómo se construye el AST</h3></div><span className="ai-badge">{aiLoading ? "✦ CONSULTANDO GEMINI" : geminiListo ? `✦ ${result.modelo_ia}` : "✦ GEMINI"}</span></div>
-          <div className="formula-banner"><span>FÓRMULA</span><code>{source || "—"}</code></div>
-          <pre className="typed-process">{aiLoading ? aiWait : (typedProcess || result.ia_error || "Compila una expresión para que Gemini explique la fórmula paso a paso.")}</pre>
-      </section>
-      <section id="types-step" className="types-grid">
-        <Table title="06 / Tabla de tipos" headers={["Símbolo", "Tipo"]} rows={result.tipos.map((item) => [item.symbol, <span className="type-pill">{item.type}</span>])} empty={hasErrors ? "Sin tipos: no hay símbolos que clasificar." : "Sin datos todavía"} />
-        <div className="panel semantic-explanation"><div className="panel-heading"><div><span className="kicker">06 / TIPOS</span><h3>Por qué cada símbolo es entero</h3></div><span className="ai-badge">{aiLoading ? "✦ CONSULTANDO GEMINI" : geminiListo ? `✦ ${result.modelo_ia}` : "✦ GEMINI"}</span></div>
-          <div className="formula-banner"><span>FÓRMULA</span><code>{source || "—"}</code></div>
-          <pre className="semantic-process">{aiLoading ? aiWait : (typesExplanation || result.ia_error || "Compila una expresión para que Gemini explique, fila por fila, por qué cada tipo es entero.")}</pre>
+        <nav>
+          {stepMenu.map(([item, targetId, icon], index) => (
+            <button
+              key={item}
+              className={step === index ? "nav-item active" : "nav-item"}
+              onClick={() => openStep(item, targetId)}
+            >
+              <span className="nav-icon nav-step-icon" aria-hidden="true">
+                {icon}
+              </span>
+              <span className="nav-step-number">
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <span>{item}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-tools">
+          <button
+            className={section === "Errores" ? "nav-item active" : "nav-item"}
+            onClick={() => setSection("Errores")}
+          >
+            <span className="nav-icon" aria-hidden="true">
+              ⚠
+            </span>
+            <span>Errores</span>
+          </button>
+          <button
+            className={section === "Teoría" ? "nav-item active" : "nav-item"}
+            onClick={() => setSection("Teoría")}
+          >
+            <span className="nav-icon" aria-hidden="true">
+              ◈
+            </span>
+            <span>Teoría</span>
+          </button>
         </div>
-      </section>
-      <section id="machine-step" className="machine-grid">
-        <div className="panel machine-panel"><div className="panel-heading"><div><span className="kicker">07 / GENERACIÓN</span><h3>Código máquina</h3></div><span className="machine-badge">STACK VM</span></div>
-          <div className="machine-code">{result.codigo_maquina?.length ? result.codigo_maquina.map((instruction, index) => <div className="machine-line" key={`${instruction}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><code>{instruction}</code><i>{instruction.startsWith("PUSH") ? "cargar" : instruction === "STORE R0" ? "guardar" : "operar"}</i></div>) : <span className="muted">{hasErrors ? (aiLoading ? aiWait : (machineExplanation || "No hay instrucciones porque la fórmula tiene errores.")) : "Las instrucciones aparecerán después de compilar."}</span>}</div>
+        <div className="sidebar-foot">
+          <span className="status-dot" /> API Python conectable
+          <br />
+          <small>
+            {aiLoading
+              ? `✦ Consultando Gemini · ${clockLabel}`
+              : `IA: ${result.modelo_ia || "pendiente"} · ${clockLabel}`}
+          </small>
         </div>
-        <div className="panel machine-explanation"><div className="panel-heading"><div><span className="kicker">07 / CONSTRUCCIÓN GUIADA</span><h3>Cómo se arma el código máquina</h3></div><span className="ai-badge">{aiLoading ? "✦ CONSULTANDO GEMINI" : geminiListo ? `✦ ${result.modelo_ia}` : "✦ GEMINI"}</span></div>
-          <pre className="machine-process">{aiLoading ? aiWait : (machineExplanation || result.ia_error || "Compila una expresión para que Gemini explique cada instrucción de la pila.")}</pre>
-        </div>
-      </section>
-      <section id="result-step" className="result-card"><span className="kicker">08 / RESULTADO</span><h3>Resultado final</h3><strong>{result.resultado ?? "—"}</strong><p>{result.resultado !== null ? "AST evaluado correctamente" : (hasErrors ? (aiLoading ? aiWait : (resultExplanation || result.ia_error || "No hay resultado porque la fórmula tiene errores.")) : "Sin resultado disponible")}</p></section>
-      </>}
-      <footer>ArithLab+ · Simulador educativo de teoría de compiladores <span>Lexer · Parser · Semántica</span></footer>
-    </main>
-  </div>;
+      </aside>
+      <main className="main-content">
+        <header className="topbar">
+          <div>
+            <p className="eyebrow">LABORATORIO / {section.toUpperCase()}</p>
+            <h2>
+              <AnimatedTitle>Simulador de compilador aritmético</AnimatedTitle>
+            </h2>
+          </div>
+          <button
+            className="download-button"
+            onClick={() => createReport(result, source)}
+          >
+            ↓ Descargar reporte
+          </button>
+        </header>
+        <section className="metrics">
+          <Metric
+            label="Tokens"
+            value={metrics.tokens.toString().padStart(2, "0")}
+          />
+          <Metric
+            label="Operandos únicos"
+            value={metrics.symbols.toString().padStart(2, "0")}
+          />
+          <Metric
+            label="Nodos del AST"
+            value={metrics.nodes.toString().padStart(2, "0")}
+          />
+          <Metric
+            label="Estado"
+            value={metrics.status}
+            tone={hasErrors ? "error-text" : "success-text"}
+          />
+        </section>
+        <section className="pipeline panel">
+          <div className="pipeline-line">
+            {pipeline.map((item, index) => (
+              <button
+                key={item}
+                className={
+                  index <= step ? "pipeline-stage reached" : "pipeline-stage"
+                }
+                onClick={() => moveStep(index)}
+              >
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <b>{item}</b>
+                {index < pipeline.length - 1 && <i />}
+              </button>
+            ))}
+          </div>
+          <div className="step-controls">
+            <span>Modo paso a paso</span>
+            <button onClick={() => moveStep(step - 1)}>←</button>
+            <button onClick={() => moveStep(step + 1)}>→</button>
+          </div>
+        </section>
+        {section !== "Simulador" && (
+          <section className="section-view panel">
+            <div className="section-view-header">
+              <div>
+                <span className="kicker">VISTA / {section.toUpperCase()}</span>
+                <h3>
+                  {section === "Teoría"
+                    ? "Guía de teoría de compiladores"
+                    : `Resultados de ${section}`}
+                </h3>
+              </div>
+              <SectionDownload
+                section={section}
+                result={result}
+                source={source}
+              />
+            </div>
+            {section === "Errores" && (
+              <div className="error-view">
+                {result.errores.length ? (
+                  <>
+                    {result.errores.map((error) => (
+                      <div className="error-box" key={error}>
+                        {error}
+                      </div>
+                    ))}
+                    <div className="panel ai-error-explanation">
+                      <div className="panel-heading">
+                        <div>
+                          <span className="kicker">ANÁLISIS IA DEL ERROR</span>
+                          <h3>Por qué ocurrió el error</h3>
+                        </div>
+                        <span className="ai-badge">
+                          {aiLoading
+                            ? "✦ CONSULTANDO GEMINI"
+                            : geminiListo
+                              ? `✦ ${result.modelo_ia}`
+                              : "✦ GEMINI"}
+                        </span>
+                      </div>
+                      <pre className="semantic-process">
+                        {aiLoading
+                          ? aiWait
+                          : result.explicacion_error ||
+                            result.ia_error ||
+                            "Compila una fórmula con error para que Gemini la explique."}
+                      </pre>
+                    </div>
+                  </>
+                ) : (
+                  <div className="success-box">
+                    No hay errores. La expresión es válida.
+                  </div>
+                )}
+              </div>
+            )}
+            {section === "Teoría" && (
+              <div className="theory-view">
+                <article>
+                  <h4>1. Análisis léxico</h4>
+                  <p>
+                    Lee la fórmula, ignora espacios y reconoce números y
+                    operadores válidos. Los caracteres desconocidos se reportan
+                    con su posición.
+                  </p>
+                </article>
+                <article>
+                  <h4>2. Análisis sintáctico</h4>
+                  <p>
+                    El parser de descenso recursivo aplica precedencia: primero
+                    multiplicación/división y luego suma/resta. Las operaciones
+                    iguales se agrupan de izquierda a derecha.
+                  </p>
+                </article>
+                <article>
+                  <h4>3. Semántica y código máquina</h4>
+                  <p>
+                    Los números únicos reciben direcciones simuladas y el AST se
+                    traduce a instrucciones PUSH, ADD, SUB, MUL, DIV y STORE R0.
+                  </p>
+                </article>
+              </div>
+            )}
+          </section>
+        )}
+        {section === "Simulador" && (
+          <>
+            <section id="entrada-step" className="panel input-panel">
+              <div className="panel-heading">
+                <div>
+                  <span className="kicker">01 / ENTRADA</span>
+                  <h3>Escribe tu expresión</h3>
+                </div>
+                <span className="live-badge">
+                  <span /> EN VIVO
+                </span>
+              </div>
+              <textarea
+                value={source}
+                onChange={(event) => setSource(event.target.value)}
+                aria-label="Expresión aritmética"
+                placeholder="Ej. 10 + 25 * 10 - 4"
+              />
+              <div className="quick-examples">
+                <span>Ejemplos rápidos</span>
+                {examples.map(([label, value]) => (
+                  <button key={label} onClick={() => setSource(value)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="input-actions">
+                <button
+                  className="compile-button"
+                  onClick={compile}
+                  disabled={loading}
+                >
+                  {loading ? "Compilando..." : "Compilar expresión  →"}
+                </button>
+                <label className="switch-label">
+                  <input
+                    type="checkbox"
+                    checked={zeroBased}
+                    onChange={(e) => setZeroBased(e.target.checked)}
+                  />
+                  <span className="switch" /> Posiciones desde{" "}
+                  {zeroBased ? "0" : "1"}
+                </label>
+              </div>
+              {hasErrors && (
+                <div className="error-box">
+                  <strong>
+                    ! Se encontraron {result.errores.length} error
+                    {result.errores.length > 1 ? "es" : ""}
+                  </strong>
+                  {result.errores.map((error) => (
+                    <p key={error}>{error}</p>
+                  ))}
+                  <p className="error-ai">
+                    <b>Explicación IA:</b>{" "}
+                    {aiLoading
+                      ? aiWait
+                      : result.explicacion_error ||
+                        result.ia_error ||
+                        "Gemini todavía no explica este error."}
+                  </p>
+                </div>
+              )}
+            </section>
+            <section id="tokens-step" className="section-block">
+              <div className="section-title">
+                <span className="kicker">02 / LÉXICO</span>
+                <h3>Tokens identificados</h3>
+              </div>
+              <div className="token-list">
+                {result.tokens.length ? (
+                  result.tokens.map((token, index) => (
+                    <button
+                      className={`token-chip ${token.type === "NÚMERO" ? "number-chip" : "operator-chip"}`}
+                      key={`${token.position}-${index}`}
+                      onMouseEnter={() => setActiveToken(token.value)}
+                      onMouseLeave={() => setActiveToken(null)}
+                    >
+                      <small>{String(index + 1).padStart(2, "0")}</small>
+                      {token.value}
+                      <em>{token.type}</em>
+                    </button>
+                  ))
+                ) : (
+                  <span className="muted">
+                    {hasErrors
+                      ? "No quedó una lista completa de tokens."
+                      : "Los tokens aparecerán después de compilar."}
+                  </span>
+                )}
+              </div>
+              {hasErrors && (
+                <pre className="semantic-process">
+                  {aiLoading
+                    ? aiWait
+                    : tokenExplanation ||
+                      result.ia_error ||
+                      "Gemini explicará qué caracteres no pudieron ser token."}
+                </pre>
+              )}
+            </section>
+            <section id="ast-step" className="panel ast-panel">
+              <div className="panel-heading">
+                <div>
+                  <span className="kicker">03 / SINTAXIS</span>
+                  <h3>
+                    Árbol de sintaxis abstracta{" "}
+                    <span className="mini-tag">SVG</span>
+                  </h3>
+                </div>
+                <span className="ast-legend">
+                  <i className="cream-dot" /> número <i className="lilac-dot" />{" "}
+                  operador
+                </span>
+              </div>
+              <div className="ast-stage">
+                {result.ast ? (
+                  <AstSvg node={result.ast} activeToken={activeToken} />
+                ) : (
+                  <div className="empty-ast">
+                    <div>⌁</div>
+                    <p>
+                      {hasErrors
+                        ? "El AST no se construyó"
+                        : "El AST aparecerá aquí"}
+                    </p>
+                    <small>
+                      {hasErrors
+                        ? "El parser se detiene porque la fórmula tiene errores."
+                        : "Compila una expresión para visualizar su estructura."}
+                    </small>
+                  </div>
+                )}
+              </div>
+              <pre className="ast-text">
+                {result.ast_text ||
+                  (hasErrors
+                    ? aiLoading
+                      ? aiWait
+                      : astExplanation ||
+                        result.ia_error ||
+                        "Gemini explicará por qué no hay árbol."
+                    : "└── esperando entrada...")}
+              </pre>
+              {(result.ast || hasErrors) && (
+                <pre className="semantic-process ast-why">
+                  {aiLoading
+                    ? aiWait
+                    : astExplanation ||
+                      result.ia_error ||
+                      "Gemini explicará por qué el árbol queda con esta forma."}
+                </pre>
+              )}
+            </section>
+            <section id="semantic-step" className="semantic-grid">
+              <Table
+                title="04 / Tabla semántica"
+                headers={["Símbolo", "Dirección"]}
+                rows={result.simbolos.map((item) => [
+                  item.symbol,
+                  <code>{item.address}</code>,
+                ])}
+                empty={
+                  hasErrors
+                    ? "Sin símbolos: el análisis no llegó a esta fase."
+                    : "Sin datos todavía"
+                }
+              />
+              <div className="panel semantic-explanation">
+                <div className="panel-heading">
+                  <div>
+                    <span className="kicker">04 / ANÁLISIS SEMÁNTICO</span>
+                    <h3>Cómo se construyó la tabla</h3>
+                  </div>
+                  <span className="ai-badge">
+                    {aiLoading
+                      ? "✦ CONSULTANDO GEMINI"
+                      : geminiListo
+                        ? `✦ ${result.modelo_ia}`
+                        : "✦ GEMINI"}
+                  </span>
+                </div>
+                <div className="formula-banner">
+                  <span>FÓRMULA</span>
+                  <code>{source || "—"}</code>
+                </div>
+                <pre className="semantic-process">
+                  {aiLoading
+                    ? aiWait
+                    : semanticExplanation ||
+                      result.ia_error ||
+                      "Compila una expresión para que Gemini explique cada símbolo, su dirección y su tipo."}
+                </pre>
+              </div>
+            </section>
+            <section id="construction-step" className="panel process-panel">
+              <div className="panel-heading">
+                <div>
+                  <span className="kicker">05 / EJECUCIÓN GUIADA</span>
+                  <h3>Cómo se construye el AST</h3>
+                </div>
+                <span className="ai-badge">
+                  {aiLoading
+                    ? "✦ CONSULTANDO GEMINI"
+                    : geminiListo
+                      ? `✦ ${result.modelo_ia}`
+                      : "✦ GEMINI"}
+                </span>
+              </div>
+              <div className="formula-banner">
+                <span>FÓRMULA</span>
+                <code>{source || "—"}</code>
+              </div>
+              <pre className="typed-process">
+                {aiLoading
+                  ? aiWait
+                  : typedProcess ||
+                    result.ia_error ||
+                    "Compila una expresión para que Gemini explique la fórmula paso a paso."}
+              </pre>
+            </section>
+            <section id="types-step" className="types-grid">
+              <Table
+                title="06 / Tabla de tipos"
+                headers={["Símbolo", "Tipo"]}
+                rows={result.tipos.map((item) => [
+                  item.symbol,
+                  <span className="type-pill">{item.type}</span>,
+                ])}
+                empty={
+                  hasErrors
+                    ? "Sin tipos: no hay símbolos que clasificar."
+                    : "Sin datos todavía"
+                }
+              />
+              <div className="panel semantic-explanation">
+                <div className="panel-heading">
+                  <div>
+                    <span className="kicker">06 / TIPOS</span>
+                    <h3>Por qué cada símbolo es entero</h3>
+                  </div>
+                  <span className="ai-badge">
+                    {aiLoading
+                      ? "✦ CONSULTANDO GEMINI"
+                      : geminiListo
+                        ? `✦ ${result.modelo_ia}`
+                        : "✦ GEMINI"}
+                  </span>
+                </div>
+                <div className="formula-banner">
+                  <span>FÓRMULA</span>
+                  <code>{source || "—"}</code>
+                </div>
+                <pre className="semantic-process">
+                  {aiLoading
+                    ? aiWait
+                    : typesExplanation ||
+                      result.ia_error ||
+                      "Compila una expresión para que Gemini explique, fila por fila, por qué cada tipo es entero."}
+                </pre>
+              </div>
+            </section>
+            <section id="machine-step" className="machine-grid">
+              <div className="panel machine-panel">
+                <div className="panel-heading">
+                  <div>
+                    <span className="kicker">07 / GENERACIÓN</span>
+                    <h3>Código máquina</h3>
+                  </div>
+                  <span className="machine-badge">STACK VM</span>
+                </div>
+                <div className="machine-code">
+                  {result.codigo_maquina?.length ? (
+                    result.codigo_maquina.map((instruction, index) => (
+                      <div
+                        className="machine-line"
+                        key={`${instruction}-${index}`}
+                      >
+                        <span>{String(index + 1).padStart(2, "0")}</span>
+                        <code>{instruction}</code>
+                        <i>
+                          {instruction.startsWith("PUSH")
+                            ? "cargar"
+                            : instruction === "STORE R0"
+                              ? "guardar"
+                              : "operar"}
+                        </i>
+                      </div>
+                    ))
+                  ) : (
+                    <span className="muted">
+                      {hasErrors
+                        ? aiLoading
+                          ? aiWait
+                          : machineExplanation ||
+                            "No hay instrucciones porque la fórmula tiene errores."
+                        : "Las instrucciones aparecerán después de compilar."}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="panel machine-explanation">
+                <div className="panel-heading">
+                  <div>
+                    <span className="kicker">07 / CONSTRUCCIÓN GUIADA</span>
+                    <h3>Cómo se arma el código máquina</h3>
+                  </div>
+                  <span className="ai-badge">
+                    {aiLoading
+                      ? "✦ CONSULTANDO GEMINI"
+                      : geminiListo
+                        ? `✦ ${result.modelo_ia}`
+                        : "✦ GEMINI"}
+                  </span>
+                </div>
+                <pre className="machine-process">
+                  {aiLoading
+                    ? aiWait
+                    : machineExplanation ||
+                      result.ia_error ||
+                      "Compila una expresión para que Gemini explique cada instrucción de la pila."}
+                </pre>
+              </div>
+            </section>
+            <section id="result-step" className="result-card">
+              <span className="kicker">08 / RESULTADO</span>
+              <h3>Resultado final</h3>
+              <strong>{result.resultado ?? "—"}</strong>
+              <p>
+                {result.resultado !== null
+                  ? "AST evaluado correctamente"
+                  : hasErrors
+                    ? aiLoading
+                      ? aiWait
+                      : resultExplanation ||
+                        result.ia_error ||
+                        "No hay resultado porque la fórmula tiene errores."
+                    : "Sin resultado disponible"}
+              </p>
+            </section>
+          </>
+        )}
+        <footer>
+          ArithLab+ · Simulador educativo de teoría de compiladores{" "}
+          <span>Lexer · Parser · Semántica</span>
+        </footer>
+      </main>
+    </div>
+  );
 }
