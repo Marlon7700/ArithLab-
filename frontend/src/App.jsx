@@ -10,7 +10,7 @@ const examples = [
   ["Con error", "7 $ 3 & 2"],
 ];
 
-const emptyResult = { tokens: [], ast: null, ast_text: "", simbolos: [], tipos: [], errores: [], resultado: null, codigo_maquina: [], pasos_resolucion: [], explicacion_ia: "", explicacion_semantica: "", explicacion_codigo_maquina: "", modelo_ia: "determinista", base_posiciones: 1 };
+const emptyResult = { tokens: [], ast: null, ast_text: "", simbolos: [], tipos: [], errores: [], resultado: null, codigo_maquina: [], pasos_resolucion: [], explicacion_ia: "", explicacion_semantica: "", explicacion_codigo_maquina: "", explicacion_error: "", modelo_ia: "determinista", base_posiciones: 1 };
 
 const menuIcons = {
   Simulador: "▦",
@@ -385,30 +385,29 @@ export default function App() {
       }
       const compiled = await response.json();
       setResult(compiled);
-      if (compiled.ast && compiled.errores.length === 0) {
-        const controller = new AbortController();
-        const timeout = window.setTimeout(() => controller.abort(), 12000);
-        fetch(`${API_URL}/explicar`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ source, zero_based: zeroBased }),
-          signal: controller.signal,
+      const endpoint = compiled.errores.length ? "/explicar-error" : "/explicar";
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 5000);
+      fetch(`${API_URL}${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source, zero_based: zeroBased }),
+        signal: controller.signal,
+      })
+        .then((explanationResponse) => explanationResponse.ok ? explanationResponse.json() : null)
+        .then((improved) => {
+          if (!improved) return;
+          setResult((current) => ({
+            ...current,
+            explicacion_ia: improved.explicacion_ia || current.explicacion_ia,
+            explicacion_semantica: improved.explicacion_semantica || current.explicacion_semantica,
+            explicacion_codigo_maquina: improved.explicacion_codigo_maquina || current.explicacion_codigo_maquina,
+            explicacion_error: improved.explicacion_error || current.explicacion_error,
+            modelo_ia: improved.modelo_ia || current.modelo_ia,
+          }));
         })
-          .then((explanationResponse) => explanationResponse.ok ? explanationResponse.json() : null)
-          .then((improved) => {
-            if (improved) {
-              setResult((current) => ({
-                ...current,
-                explicacion_ia: improved.explicacion_ia || current.explicacion_ia,
-                explicacion_semantica: improved.explicacion_semantica || current.explicacion_semantica,
-                explicacion_codigo_maquina: improved.explicacion_codigo_maquina || current.explicacion_codigo_maquina,
-                modelo_ia: improved.modelo_ia || current.modelo_ia,
-              }));
-            }
-          })
-          .catch(() => undefined)
-          .finally(() => window.clearTimeout(timeout));
-      }
+        .catch(() => undefined)
+        .finally(() => window.clearTimeout(timeout));
     } catch (error) {
       setResult({ ...emptyResult, errores: [`Backend no disponible. Ejecuta: python -m uvicorn backend.main:app --reload --port 8000 (${error.message})`] });
     } finally { setLoading(false); }
@@ -468,7 +467,9 @@ export default function App() {
           <textarea className="step-entry" value={source} onChange={(event) => setSource(event.target.value)} aria-label="Expresión aritmética" placeholder="Ej. 10 + 25 * 10 - 4" />
           <div className="quick-examples">{examples.map(([label, value]) => <button key={label} onClick={() => setSource(value)}>{label}: {value}</button>)}</div>
           <div className="input-actions"><button className="compile-button" onClick={compile} disabled={loading}>{loading ? "Compilando..." : "Compilar expresión  →"}</button><label className="switch-label"><input type="checkbox" checked={zeroBased} onChange={(e) => setZeroBased(e.target.checked)} /><span className="switch" /> Posiciones desde {zeroBased ? "0" : "1"}</label></div>
-          {hasErrors && <div className="error-box">{result.errores.map((error) => <p key={error}>{error}</p>)}</div>}
+          {hasErrors && <div className="error-box">{result.errores.map((error) => <p key={error}>{error}</p>)}
+            {result.explicacion_error && <p className="error-ai"><b>Explicación IA:</b> {result.explicacion_error}</p>}
+          </div>}
         </div>}
         {section === "Tokens" && <><p className="view-description">Cada token representa una unidad reconocida por el analizador léxico.</p><Table title="Tokens identificados" headers={["N.º", "Tipo", "Valor", "Posición"]} rows={result.tokens.map((token, index) => [index + 1, token.type, token.value, token.position])} /></>}
         {section === "AST" && <><p className="view-description">Arrastra las bolitas para ordenar el árbol. Los operadores lilas son nodos internos y los números crema son hojas.</p><div className="ast-stage large-ast">{result.ast ? <AstSvg node={result.ast} activeToken={activeToken} /> : <div className="empty-ast"><p>Compila una expresión para visualizar el AST.</p></div>}</div><pre className="ast-text">{result.ast_text || "No hay AST generado."}</pre></>}
@@ -478,7 +479,10 @@ export default function App() {
         {section === "Código máquina" && <><p className="view-description">La traducción usa una máquina de pila y recorrido postorden sobre el AST.</p><div className="machine-grid"><div className="panel machine-panel"><div className="panel-heading"><div><span className="kicker">CÓDIGO MÁQUINA</span><h3>Instrucciones</h3></div><span className="machine-badge">STACK VM</span></div><div className="machine-code">{result.codigo_maquina?.length ? result.codigo_maquina.map((instruction, index) => <div className="machine-line" key={`${instruction}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><code>{instruction}</code><i>{instruction.startsWith("PUSH") ? "cargar" : instruction === "STORE R0" ? "guardar" : "operar"}</i></div>) : <span className="muted">Las instrucciones aparecerán después de compilar.</span>}</div></div><div className="panel machine-explanation"><div className="panel-heading"><div><span className="kicker">CONSTRUCCIÓN GUIADA</span><h3>Cómo se arma</h3></div><span className="ai-badge">✦ POSTORDEN</span></div><pre className="machine-process">{machineExplanation || "Compila una expresión para explicar el código máquina."}</pre></div></div></>}
         {section === "Resultado" && <div className="result-card step-result"><span className="kicker">08 / RESULTADO FINAL</span><h3>Valor obtenido</h3><strong>{result.resultado ?? "—"}</strong><p>{result.resultado !== null ? "El AST fue evaluado correctamente." : "Compila una expresión válida para obtener el resultado."}</p></div>}
         {section === "Tablas" && <div className="tables-grid section-tables"><Table title="Tabla de símbolos" headers={["Símbolo", "Dirección"]} rows={result.simbolos.map((item) => [item.symbol, <code>{item.address}</code>])} /><Table title="Tabla de tipos" headers={["Símbolo", "Tipo"]} rows={result.tipos.map((item) => [item.symbol, <span className="type-pill">{item.type}</span>])} /></div>}
-        {section === "Errores" && <div className="error-view">{result.errores.length ? result.errores.map((error) => <div className="error-box" key={error}>{error}</div>) : <div className="success-box">No hay errores. La expresión es válida.</div>}</div>}
+        {section === "Errores" && <div className="error-view">{result.errores.length ? <>
+          {result.errores.map((error) => <div className="error-box" key={error}>{error}</div>)}
+          <div className="panel ai-error-explanation"><div className="panel-heading"><div><span className="kicker">ANÁLISIS IA DEL ERROR</span><h3>Por qué ocurrió el error</h3></div><span className="ai-badge">✦ GEMINI</span></div><pre className="semantic-process">{result.explicacion_error || "La IA está preparando una explicación del error..."}</pre></div>
+        </> : <div className="success-box">No hay errores. La expresión es válida.</div>}</div>}
         {section === "Teoría" && <div className="theory-view"><article><h4>1. Análisis léxico</h4><p>Lee la fórmula, ignora espacios y reconoce números y operadores válidos. Los caracteres desconocidos se reportan con su posición.</p></article><article><h4>2. Análisis sintáctico</h4><p>El parser de descenso recursivo aplica precedencia: primero multiplicación/división y luego suma/resta. Las operaciones iguales se agrupan de izquierda a derecha.</p></article><article><h4>3. Semántica y código máquina</h4><p>Los números únicos reciben direcciones simuladas y el AST se traduce a instrucciones PUSH, ADD, SUB, MUL, DIV y STORE R0.</p></article></div>}
       </section>}
       {section === "Simulador" && <>
@@ -486,7 +490,9 @@ export default function App() {
           <textarea value={source} onChange={(event) => setSource(event.target.value)} aria-label="Expresión aritmética" placeholder="Ej. 10 + 25 * 10 - 4" />
           <div className="quick-examples"><span>Ejemplos rápidos</span>{examples.map(([label, value]) => <button key={label} onClick={() => setSource(value)}>{label}</button>)}</div>
           <div className="input-actions"><button className="compile-button" onClick={compile} disabled={loading}>{loading ? "Compilando..." : "Compilar expresión  →"}</button><label className="switch-label"><input type="checkbox" checked={zeroBased} onChange={(e) => setZeroBased(e.target.checked)} /><span className="switch" /> Posiciones desde {zeroBased ? "0" : "1"}</label></div>
-          {hasErrors && <div className="error-box"><strong>! Se encontraron {result.errores.length} error{result.errores.length > 1 ? "es" : ""}</strong>{result.errores.map((error) => <p key={error}>{error}</p>)}</div>}
+          {hasErrors && <div className="error-box"><strong>! Se encontraron {result.errores.length} error{result.errores.length > 1 ? "es" : ""}</strong>{result.errores.map((error) => <p key={error}>{error}</p>)}
+            {result.explicacion_error && <p className="error-ai"><b>Explicación IA:</b> {result.explicacion_error}</p>}
+          </div>}
       </section>
       <section id="tokens-step" className="section-block"><div className="section-title"><span className="kicker">02 / LÉXICO</span><h3>Tokens identificados</h3></div><div className="token-list">{result.tokens.length ? result.tokens.map((token, index) => <button className={`token-chip ${token.type === "NÚMERO" ? "number-chip" : "operator-chip"}`} key={`${token.position}-${index}`} onMouseEnter={() => setActiveToken(token.value)} onMouseLeave={() => setActiveToken(null)}><small>{String(index + 1).padStart(2, "0")}</small>{token.value}<em>{token.type}</em></button>) : <span className="muted">Los tokens aparecerán después de compilar.</span>}</div></section>
       <section id="ast-step" className="panel ast-panel"><div className="panel-heading"><div><span className="kicker">03 / SINTAXIS</span><h3>Árbol de sintaxis abstracta <span className="mini-tag">SVG</span></h3></div><span className="ast-legend"><i className="cream-dot" /> número <i className="lilac-dot" /> operador</span></div>

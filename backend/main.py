@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from .lexer import Token, token_as_dict, tokenize
 from .parser import Parser, ast_to_text
 from .semantic import build_tables, evaluate, generate_machine_code, build_resolution_steps
-from .gemini import build_local_explanations, generate_explanation
+from .gemini import build_local_explanations, generate_explanation, generate_error_explanation
 
 app = FastAPI(title="ArithLab+ API", version="1.0.0")
 app.add_middleware(
@@ -67,6 +67,7 @@ def compile_expression(request: CompileRequest) -> dict:
         "explicacion_semantica": "",
         "explicacion_codigo_maquina": "",
         "modelo_ia": "determinista",
+        "explicacion_error": "",
         "base_posiciones": 0 if request.zero_based else 1,
     }
 
@@ -104,3 +105,18 @@ def explain_expression(request: CompileRequest) -> dict:
             "explicacion_codigo_maquina": "",
         }
     return generate_explanation(request.source, compiled)
+
+
+@app.post("/explicar-error")
+def explain_error(request: CompileRequest) -> dict:
+    compiled = compile_expression(request)
+    if not compiled.get("errores"):
+        return {
+            "explicacion_error": "La expresión no contiene errores.",
+            "modelo_ia": "determinista",
+        }
+    return generate_error_explanation(
+        request.source,
+        compiled["errores"],
+        request.zero_based,
+    )

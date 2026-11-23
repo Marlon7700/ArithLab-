@@ -51,6 +51,13 @@ class CompilerTests(unittest.TestCase):
         self.assertEqual(valid["tokens"][0]["position"], 0)
         self.assertEqual(valid["tokens"][1]["position"], 3)
 
+    def test_error_response_contains_local_ia_explanation(self):
+        from .main import explain_error
+
+        response = explain_error(CompileRequest(source="7 $ 3 & 2", zero_based=False))
+        self.assertIn("no pudo compilarse", response["explicacion_error"])
+        self.assertIn("posición 3", response["explicacion_error"])
+
 
 if __name__ == "__main__":
     unittest.main()

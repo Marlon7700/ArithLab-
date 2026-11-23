@@ -166,6 +166,7 @@ def generate_explanation(source: str, result: dict) -> dict[str, str]:
     model = select_model(api_key)
     if not model:
         return {**local, "modelo_ia": "determinista"}
+
     safe_data = {
         "entrada": source,
         "tokens": result["tokens"],
@@ -217,7 +218,7 @@ def generate_explanation(source: str, result: dict) -> dict[str, str]:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=12) as response:
+            with urllib.request.urlopen(request, timeout=6) as response:
                 payload = json.loads(response.read().decode("utf-8"))
             text = _extract_response_text(payload)
             if not text:
@@ -237,3 +238,57 @@ def generate_explanation(source: str, result: dict) -> dict[str, str]:
         except Exception:
             continue
     return {**local, "modelo_ia": "determinista"}
+
+
+def generate_error_explanation(source: str, errors: list[str], zero_based: bool) -> dict[str, str]:
+    """Explica errores léxicos o sintácticos usando la API y una respuesta local rápida."""
+    base = "desde cero (0)" if zero_based else "desde uno (1)"
+    local = (
+        f"La expresión «{source}» no pudo compilarse porque contiene errores.\n"
+        f"Las posiciones se cuentan {base}.\n"
+        + "\n".join(f"• {error}" for error in errors)
+    )
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return {"explicacion_error": local, "modelo_ia": "determinista"}
+
+    model = select_model(api_key)
+    if not model:
+        return {"explicacion_error": local, "modelo_ia": "determinista"}
+
+    prompt = (
+        "Eres un profesor de Teoría de Compiladores. Explica en español por qué "
+        "esta expresión produjo errores. Usa únicamente los errores entregados.\n"
+        "Indica qué carácter o estructura es inválida, su posición conforme a la "
+        "base indicada y qué cambio mínimo haría válida la fórmula.\n"
+        "Si los errores son léxicos, distingue caracteres válidos e inválidos.\n"
+        "Si el análisis sintáctico falla, explica el número u operador esperado.\n"
+        "Devuelve únicamente texto plano en 2 o 3 párrafos breves.\n"
+        f"Entrada: {source}\n"
+        f"Base de posiciones: {base}\n"
+        f"Errores reales: {json.dumps(errors, ensure_ascii=False)}"
+    )
+    body = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 220,
+            "responseMimeType": "text/plain",
+        },
+    }).encode("utf-8")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        text = _extract_response_text(payload)
+        if text:
+            return {"explicacion_error": text, "modelo_ia": model}
+    except Exception:
+        pass
+    return {"explicacion_error": local, "modelo_ia": "determinista"}
