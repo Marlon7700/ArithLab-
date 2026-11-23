@@ -18,8 +18,10 @@ backend/
   principal.py        # rutas /compilar, /explicar y /explicar-error
   pruebas.py          # pruebas del compilador, sin llamar a la red
 frontend/
-  src/App.jsx         # interfaz
-  src/styles.css
+  .env.example        # dirección del backend cuando no es localhost
+  src/main.jsx        # monta la aplicación en la página
+  src/App.jsx         # simulador: fórmula, árbol, tablas y Gemini
+  src/styles.css      # colores, paneles y animación del árbol
 ```
 
 `backend/.env` guarda la clave real y no se publica. `node_modules/` y `__pycache__/` se generan solos.
@@ -1378,3 +1380,333 @@ class CompilerTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 ````
+
+## Frontend
+
+Estos archivos no calculan la fórmula. Dibujan el simulador y le piden al backend los datos y el texto de Gemini. Si se borra la carpeta `frontend/src`, el servidor de Python sigue compilando, pero el navegador queda sin página.
+
+### `frontend/src/main.jsx`
+
+Es el arranque de la página. Tiene 13 líneas y ninguna clase.
+
+```jsx
+// Punto de entrada del frontend. Monta App en #root.
+// Si se elimina createRoot, la página queda en blanco: ningún componente se dibuja.
+import React from "react";
+import { createRoot } from "react-dom/client";
+import "bootstrap/dist/css/bootstrap.min.css";
+import "./styles.css";
+import App from "./App";
+
+createRoot(document.getElementById("root")).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);
+```
+
+| Líneas | Qué es | Para qué sirve | Si se elimina |
+|---|---|---|---|
+| 1-2 | Comentarios | Explican el archivo. | Sí sigue igual. Un comentario no se ejecuta. |
+| 3 | Import de React | Permite escribir `<App />` y `StrictMode`. | No. El archivo ni siquiera carga. |
+| 4 | `createRoot` | Crea la raíz de React dentro de `<div id="root">` del HTML. | No. No hay quién dibuje la interfaz. La página queda en blanco. |
+| 5 | Bootstrap | Carga la rejilla y las tablas básicas. | El simulador abre, pero las tablas pierden el estilo de Bootstrap. |
+| 6 | `styles.css` | Tema oscuro, paneles y árbol. | La página funciona, pero se ve sin diseño. |
+| 7 | `App` | El simulador completo. | No. No hay pantalla que montar. |
+| 9 | `createRoot(...).render` | Busca `#root` y pinta dentro. | No. El JavaScript carga y no muestra nada. |
+| 10 | `StrictMode` | En desarrollo, React revisa dos veces algunos efectos para detectar errores. | Sí. La aplicación se ve igual. Solo se pierde esa revisión extra. |
+| 11 | `<App />` | Muestra el laboratorio. | No. La raíz queda vacía. |
+
+No hay ciclos ni clases en este archivo. El único anidamiento es el de las etiquetas.
+
+### `frontend/.env.example`
+
+```text
+# Solo necesario cuando el backend está publicado en otra dirección.
+# Para desarrollo local se usa automáticamente http://localhost:8000.
+VITE_API_URL=http://localhost:8000
+```
+
+`App.jsx` lee `VITE_API_URL`. Si esa variable no existe, usa `http://localhost:8000`. Si se borra el archivo y el backend está en la misma máquina, el simulador sigue. Si el backend está en Render u otra dirección y no se define `VITE_API_URL`, el botón Compilar habla con localhost y responde que el backend no está disponible.
+
+### `frontend/src/App.jsx`
+
+Un solo componente grande, `App`, y varias funciones que dibujan piezas. No hay clases. El estado vive en `useState`.
+
+Datos fijos, líneas 6-35:
+
+- `API_URL` es la dirección del backend. Si se quita el `|| "http://localhost:8000"`, en local la petición va a `undefined/compilar` y falla.
+- `examples` son los cuatro botones: fórmula válida, asociación izquierda, números repetidos y fórmula con error. Si se borra el arreglo, esos botones desaparecen. El área de texto sigue sirviendo.
+- `emptyResult` es la pantalla antes de compilar y también el resultado cuando el backend no responde. Si se borra un campo, esa tarjeta lee `undefined`.
+
+`clientClock`, líneas 39-57. No tiene ciclo. Tiene dos condicionales ternarios: hora menor que 12 es mañana, menor que 19 es tarde, si no es noche. Arma `hora_cliente` y se lo manda a Gemini. Si se elimina la función, `compile` no puede enviar la hora y el reloj de la barra lateral deja de actualizarse.
+
+`asHtml`, líneas 60-66. Cuatro `replace`, no es un ciclo. Cambia `&`, `<` y `>` para que el reporte no interprete el texto de Gemini como HTML, y cambia saltos de línea por `<br>`. Si se quita, un texto con `<` puede romper el reporte impreso.
+
+`countNodes`, líneas 68-69. Es recursiva, no es un `while`. Si el nodo existe, suma 1 más los hijos izquierdo y derecho. Si se elimina, la métrica «Nodos del AST» no se puede calcular y la pantalla falla al pintar las métricas.
+
+`AstSvg`, líneas 72-309. Dibuja el árbol y lo narra en voz.
+
+- `leafCount` (78-82): si no hay nodo devuelve 0; si no tiene hijos devuelve 1; si no, suma las hojas de la izquierda y de la derecha. Sirve para repartir el ancho. Si se quita, `flatten` no sabe dónde colocar cada bolita.
+- `useEffect` de la línea 84: al cambiar la fórmula, olvida las posiciones arrastradas. Si se quita, un árbol nuevo hereda el arrastre del anterior.
+- `flatten` (85-98): ciclo de recursión. Pone el nodo en el centro de su tramo y llama a la izquierda y luego a la derecha. Si se quita una de las dos llamadas, ese lado del árbol no se dibuja. Si se quita la función, el SVG no tiene nodos.
+- El `useEffect` de las líneas 105-173 arma la voz. `advance` es el ciclo: mientras `step` sea menor que la cantidad de conexiones, habla el nodo y pasa al siguiente. El `if (step >= connections.length)` corta el ciclo y marca el árbol como terminado. `speakNode` distingue operador (`typeof value === "string"`) de número. Si el navegador no tiene `speechSynthesis`, espera 1400 ms y sigue. Si se elimina este efecto, el árbol se dibuja de una vez y no hay voz. El `return` del efecto cancela la voz al salir: si se quita, la voz sigue aunque ya se compiló otra fórmula.
+- `moveNode` (174-199): si no hay arrastre (`!dragRef.current`) no hace nada. Calcula el desplazamiento y mueve el nodo y sus descendientes, los que su ruta empieza por la ruta arrastrada. Si se elimina, las bolitas no se pueden mover. El compilador no se afecta.
+- `stopMoving` pone el arrastre en `null`. Si se quita, al soltar el mouse la bolita sigue pegada al puntero.
+- El `map` de `connections` (225) dibuja una línea por hijo. `isConnected` e `isConnecting` deciden si la línea ya quedó, se está dibujando o sigue pendiente. Si se quita el `map`, el árbol queda sin aristas.
+- El `map` de `nodes` (250) dibuja cada círculo. `isOperator` elige el color. `active` resalta la bolita cuando el mouse está sobre el token del mismo valor. Si se quita este `map`, no hay bolitas.
+
+`Metric`, `AnimatedTitle`, `BrandIcon`, `Table` y `SectionDownload` son piezas visuales. `AnimatedTitle` recorre cada letra con `Array.from(children).map`. Si se quita, el título no aparece. `Table` recorre encabezados y filas. Su condicional `rows.length` muestra la tabla o la frase vacía. Si se quita `Table`, desaparecen la tabla semántica y la de tipos.
+
+`createReport` (436-559) abre una ventana de impresión con las ocho secciones. `reportAstSvg` recorre el árbol: si hay hijo izquierdo dibuja la línea a la izquierda y se llama a sí misma; igual con el derecho. Si se elimina `createReport`, el botón «Descargar reporte» falla al hacer clic. El simulador en pantalla sigue.
+
+`downloadSectionReport` (561-582) elige el HTML según el nombre de la sección. El objeto de las líneas 563-575 es esa elección. Si la sección no está, `content` queda `""`. Si se elimina la función, los botones de descarga por sección dejan de abrir el informe.
+
+`App`, desde la línea 595. Estados:
+
+| Estado | Empieza en | Si se elimina |
+|---|---|---|
+| `source` | `10 + 25 * 10 - 4` | No hay fórmula que escribir ni enviar. |
+| `result` | `emptyResult` | No hay dónde guardar tokens, árbol ni resultado. |
+| `loading` | `false` | El botón no sabe que está compilando y se puede pulsar otra vez encima. |
+| `activeToken` | `null` | Pasar el mouse por un token ya no resalta la bolita. El resto sigue. |
+| `step` | `0` | El recorrido paso a paso no tiene posición. |
+| `zeroBased` | `false` | Las posiciones quedan siempre desde 1. El interruptor deja de existir. |
+| `section` | `"Simulador"` | No se puede abrir Errores ni Teoría. |
+| `typedProcess` | `""` | El texto de la construcción no se escribe letra a letra. |
+| `aiLoading` | `false` | La pantalla no muestra «Consultando Gemini». |
+| `explainRequest` | `0` | Dos clics seguidos pueden mezclar la respuesta vieja con la nueva. |
+| `explainAbort` | `null` | La petición anterior de Gemini no se cancela. |
+
+Condicionales que deciden qué texto se ve, líneas 612-625:
+
+- `geminiListo` es verdadero solo si `modelo_ia` empieza por `gemini`. Si se quita esta condición y se muestra cualquier texto, un párrafo local o un error se presentarían como respuesta de la IA.
+- `hasErrors` mira si `errores` tiene elementos. Cambia el mensaje de espera y enciende las cajas rojas.
+- `processText`, `semanticExplanation`, `machineExplanation`, `tokenExplanation`, `astExplanation`, `typesExplanation` y `resultExplanation` quedan vacíos mientras Gemini no ha respondido. Cada tarjeta usa el suyo.
+- `aiWait` elige una frase si hay errores y otra si la fórmula es válida.
+
+El `useEffect` del reloj (627-632) no tiene `if`. `setInterval` cada 30 segundos vuelve a leer la hora. El `return` limpia el intervalo. Si se elimina el efecto, la hora de la barra se queda en la del momento en que abrió la página.
+
+El `useEffect` de la escritura (634-644) sí tiene un `if (!processText) return`. Si no hay texto de Gemini, no arranca el intervalo. El intervalo suma 2 caracteres cada 16 ms. Cuando `position` alcanza el largo, se detiene. Si se elimina, la construcción guiada muestra el párrafo completo de golpe, o no lo muestra si también se quita `typedProcess`.
+
+`compile`, líneas 646-757. Es la función del botón.
+
+1. Sube `explainRequest` y aborta la explicación anterior. Si se quita el `abort`, dos compilaciones quedan vivas a la vez.
+2. `fetch` a `/compilar` con `source`, `zero_based` y `hora_cliente`. El `if (!response.ok)` corta cuando el servidor responde con error.
+3. El `if (explainRequest.current !== requestId) return` descarta una respuesta vieja. Si se quita, una compilación lenta puede pisar la fórmula nueva.
+4. Guarda el resultado y vacía las explicaciones, con `modelo_ia` en `pendiente`.
+5. El `if (!compiled.ast && !compiled.errores.length) return` sale cuando la entrada está vacía: no llama a Gemini.
+6. Elige `/explicar-error` si hay errores y `/explicar` si el árbol existe.
+7. A los 30 segundos `AbortController` corta la espera. Si se quita el temporizador, un Gemini colgado deja el botón cargando.
+8. El `if (modelName.startsWith("gemini"))` copia los textos. Si el modelo no es Gemini, guarda `modelo_ia: "error"` y no pinta el párrafo.
+9. El `catch` de la explicación dice que Gemini tardó o no hubo conexión. El `catch` exterior dice que el backend no está disponible. Si se quitan, el error queda sin mensaje en pantalla.
+
+`metrics` (759-767) cuenta fichas, símbolos y nodos. El estado es `Error` si hay errores, `Listo` si hay árbol, y `—` si todavía no se compiló. Si se elimina, las cuatro tarjetas de arriba fallan.
+
+`openStep` (788-798) marca el paso, vuelve a la vista Simulador, hace scroll y abre el informe de esa sección. `moveStep` (799-808) limita el paso entre 0 y 7 con `Math.max` y `Math.min`. Si se quita el límite, las flechas se salen del menú y `stepMenu[bounded]` no existe.
+
+La parte que se ve, desde la línea 810:
+
+- El `map` del menú (829) pinta los ocho pasos. La clase `active` depende de `step === index`. Si se quita el `map`, el menú lateral queda vacío.
+- Los botones Errores y Teoría cambian `section`. El bloque `section !== "Simulador"` (931) muestra esas dos vistas y esconde el laboratorio. Dentro, `section === "Errores"` recorre `result.errores`. Si la lista está vacía, dice que la expresión es válida. `section === "Teoría"` son tres artículos fijos. Si se elimina ese bloque, Errores y Teoría no tienen contenido.
+- `section === "Simulador"` (1016) envuelve las ocho secciones. Si se quita la condición, el laboratorio se ve incluso estando en Teoría.
+- El `textarea` guarda lo que se escribe en `source`. Los botones de `examples.map` reemplazan la fórmula.
+- El botón Compilar llama a `compile` y se desactiva mientras `loading` es verdadero.
+- El interruptor escribe `zeroBased`. El texto del interruptor dice 0 o 1 según ese valor.
+- `hasErrors` (1060) muestra la caja roja y recorre cada mensaje. Si se quita, los errores solo se verían en la vista Errores.
+- Tokens (1086): si hay fichas, un `map` pinta cada una. Al entrar el mouse guarda `token.value`; al salir lo limpia. Si no hay fichas, el mensaje cambia según `hasErrors`.
+- AST (1132): si hay `result.ast` monta `AstSvg`; si no, muestra el recuadro vacío. El `pre` de `ast_text` usa el dibujo en texto o, si hay error, la explicación de Gemini.
+- Semántica, tipos, código y resultado repiten el mismo condicional: si `aiLoading`, muestran la espera; si Gemini ya respondió, muestran su texto; si no, muestran `ia_error` o la frase de «compila para ver».
+- El `map` del código máquina (1289) etiqueta cada instrucción: `PUSH` es «cargar», `STORE R0` es «guardar» y el resto es «operar». Si no hay instrucciones, explica por qué.
+
+Si se elimina `App.jsx` completo, `main.jsx` importa un archivo que no existe y la página no abre. El backend no se entera.
+
+### `frontend/src/styles.css`
+
+No tiene clases de programación ni ciclos. Son reglas visuales. El archivo sigue siendo válido si se borra una regla: solo se pierde esa parte del diseño. El compilador no cambia.
+
+| Grupo | Qué pinta | Si se elimina el grupo |
+|---|---|---|
+| Líneas 1-4, fuentes y Tailwind | Carga DM Sans, JetBrains Mono, Playfair y las utilidades de Tailwind. | La página usa la letra del navegador y pierde utilidades. |
+| `.app-shell`, `.sidebar`, `.brand`, `.nav-item` | Columna izquierda, marca y botones del menú. | El menú se ve como botones sueltos. |
+| `.main-content`, `.topbar`, `.metrics`, `.metric-card` | Encabezado y las cuatro cifras. | Esas zonas quedan sin margen ni tarjeta. |
+| `.pipeline`, `.pipeline-stage`, `.step-controls` | La barra 01 a 08 y las flechas. | El recorrido se ve sin la línea ni el estado «alcanzado». |
+| `.input-panel`, `.compile-button`, `.switch` | Área de la fórmula, botón verde e interruptor de posiciones. | Se pueden usar, pero sin forma de botón ni de interruptor. |
+| `.error-box`, `.success-box` | Caja roja de errores y caja verde de «no hay errores». | El texto del error sigue; pierde el fondo. |
+| `.token-chip`, `.number-chip`, `.operator-chip` | Fichas de número y de operador. | Los tokens se ven como botones planos. |
+| `.ast-svg`, `.ast-edge`, `.ast-node`, `.number-node`, `.operator-node` | Líneas, bolitas, color crema para números y lila para operadores, y la bolita activa en verde. | El árbol sigue en el SVG, pero sin color ni animación de conexión. |
+| `.semantic-process`, `.typed-process`, `.machine-process` | Los textos de Gemini, con salto de línea conservado. | El párrafo se aplasta en una sola línea. |
+| `.machine-line`, `.type-pill`, `.result-card` | Instrucciones, pastilla «entero» y el resultado grande. | Esos datos siguen en la página, sin su recuadro. |
+
+Quitar `styles.css` por completo no detiene React. `main.jsx` dejaría de encontrarlo y la página no arranca, salvo que también se quite el `import "./styles.css"`.
+
+## Qué pasa si se quita cada parte de los `.py`
+
+El código de cada archivo está más arriba. Aquí se separa por clase, función, ciclo y condicional. «Sí» significa que el proceso de Python arranca y las otras fases siguen. «No» significa que esa fase deja de existir, el resultado sale mal o el archivo no importa.
+
+### `lexico.py`
+
+No tiene clases con métodos propios más allá de `Token`, que es una ficha congelada. No tiene `for`. El único ciclo es el `while`.
+
+| Parte | Qué hace | Si se elimina, ¿sigue? |
+|---|---|---|
+| Import de `dataclass` | Permite declarar `Token` con `tipo`, `valor` y `posicion`. | No. `Token` no se puede crear. |
+| `_OPERADORES = "+-*/"` | Lista de operadores válidos. | No. La línea `caracter in _OPERADORES` falla y el léxico no recorre nada. |
+| Clase `Token` | Guarda una pieza. `frozen=True` impide cambiarla después de crearla. | No. El parser y la ruta `/compilar` reciben fichas de este tipo. |
+| Campo `tipo` | Vale `NÚMERO` u `OPERADOR`. | No. El parser no sabe si la ficha es un número. |
+| Campo `valor` | El entero o el símbolo `+ - * /`. | No. El árbol no tiene qué operar. |
+| Campo `posicion` | Lugar del carácter, empezando en 1. | El léxico podría seguir, pero los errores y la interfaz no pueden señalar el carácter. |
+| `tokenize` | Devuelve la lista de fichas y la lista de errores. | No. `/compilar` no tiene primera fase. |
+| `fichas = []` y `errores = []` | Acumuladores. | No. No hay dónde guardar el recorrido. |
+| `indice = 0` | Empieza en el primer carácter. | No. El `while` no sabe en qué posición va. |
+| `while indice < len(fuente)` | Recorre toda la fórmula, un carácter por vez, y no se detiene en el primer error. | No. Sin este ciclo no hay fichas. Si se quita solo el avance `indice += 1` del final, un carácter inválido deja el ciclo infinito. |
+| `if caracter.isspace()` | Salta espacios y tabuladores. | Los espacios se tomarían como error léxico. `10 + 4` dejaría de compilar. |
+| `if caracter.isdigit()` y el `while` interior | Junta dígitos seguidos en un solo entero. La posición es `inicio + 1`. | Cada dígito se perdería o se trataría como carácter inválido. `10` no sería el número diez. |
+| `if caracter in _OPERADORES` | Crea la ficha `OPERADOR`. | `+ - * /` caerían en el `else` y se reportarían como error. Ninguna fórmula válida compilaría. |
+| `else` del carácter inválido | Anota `Error léxico` con el carácter y la posición, y el ciclo sigue. | `$` y `&` se ignorarían en silencio o, si también se quita el avance, el ciclo no termina. |
+| `return fichas, errores` | Entrega las dos listas. | No. La función no devolvería el análisis. |
+| `token_as_dict` | Traduce `tipo`, `valor` y `posicion` a `type`, `value` y `position`. | El compilador calcula, pero la respuesta JSON no sale y `/compilar` falla al armar `tokens`. |
+
+### `sintactico.py`
+
+Hay una clase de dato, `ASTNode`, y una clase que lee, `Parser`. Los ciclos son los dos `while` de `expression` y `term`, y el `for` de `ast_to_text`.
+
+| Parte | Qué hace | Si se elimina, ¿sigue? |
+|---|---|---|
+| Import de `Token` | El parser conoce la ficha del léxico. | No. `Parser` no sabe qué lista está leyendo. |
+| Clase `ASTNode` | Un nodo con `valor`, `izquierda` y `derecha`. Una hoja deja los hijos en `None`. | No. No existe el árbol. |
+| `to_dict` | Copia el nodo a `value`, `left` y `right`. Llama a los hijos si existen. | El árbol se calcula en memoria, pero el SVG y Gemini reciben `None` o la ruta falla al pedir el diccionario. |
+| Clase `Parser` | Guarda `fichas` y `posicion`. Empieza en la ficha 0. | No. Nadie construye el árbol. |
+| `parse` | Exige que haya fichas, llama a `expression` y comprueba que no sobre ninguna. | No. `/compilar` no obtiene la raíz. |
+| `if not self.fichas` | Rechaza la lista vacía. | Una entrada sin fichas seguiría y fallaría más abajo, con un mensaje peor. |
+| `if self.posicion != len(self.fichas)` | Rechaza lo que sobra, por ejemplo `10 +`. | `10 +` podría aceptarse a medias. El árbol quedaría incompleto y el resultado sería mentira. |
+| `expression` | Lee un término y, mientras vea `+` o `-`, cuelga ese término a la izquierda y lee otro. | No hay sumas ni restas. `10 + 4` falla o se queda en el primer número. |
+| `while self._matches("+", "-")` | Asociación izquierda: `100 - 20 - 5` queda `((100 - 20) - 5)`. | Solo se lee el primer término. `100 - 20 - 5` valdría 100, no 75. |
+| `term` | Igual que `expression`, pero con `*` y `/`, y se resuelve antes. | `*` y `/` tendrían la misma prioridad que `+` y `-`, o no se reconocerían. `10 + 25 * 10 - 4` dejaría de dar 256. |
+| `while self._matches("*", "/")` | Repite el producto o la división. | `8 / 2 / 2` no se agrupa como `((8 / 2) / 2)`. |
+| `factor` | Exige una ficha `NÚMERO` y crea una hoja. | No hay hojas. El árbol no puede terminar. |
+| `if self.posicion >= len(self.fichas)` | La fórmula se acabó antes de un número, como en `10 +`. | El siguiente `_consume` lee fuera de la lista y el programa lanza una excepción distinta. |
+| `if ficha.tipo != "NÚMERO"` | Un operador donde iba un número es error sintáctico. | Un operador suelto se colaría como hoja. |
+| `_matches` | Mira si la ficha actual es un operador de los pedidos, sin consumirla. | Los `while` no saben cuándo parar. |
+| `_consume` | Devuelve la ficha actual y avanza `posicion`. | El parser releería siempre la misma ficha. |
+| `ast_to_text` | Arma el dibujo `├──` y `└──`. | El SVG puede seguir. Se pierde el texto que está debajo del árbol y Gemini no recibe esa forma. |
+| `for indice_hijo, hijo in enumerate(hijos)` | Recorre los hijos que existan, primero izquierda y luego derecha. El último lleva `└──`. | Solo aparecería la raíz. |
+
+### `semantico.py`
+
+No declara clases. Usa `ASTNode`. Hay recursión en vez de `for` para recorrer el árbol, un `for` para armar la expresión que va quedando, y un `while` para reducir operaciones.
+
+| Parte | Qué hace | Si se elimina, ¿sigue? |
+|---|---|---|
+| `_OPERACIONES_MAQUINA` | Traduce `+ - * /` a `ADD SUB MUL DIV`. | La tabla y el resultado pueden seguir. `generate_machine_code` falla al pedir una clave que no existe. |
+| `_format_number` | Un entero se escribe sin decimal. Un real usa hasta 10 cifras significativas. | `3.84` podría salir con basura de punto flotante. Los pasos de la pantalla se ven mal. |
+| `build_tables` | Devuelve símbolos `dir_1`, `dir_2`... y tipos `entero`. | `/compilar` no puede llenar `simbolos` ni `tipos`. Esas tablas quedan vacías. |
+| `_collect_numbers` | Recorre izquierda y derecha. Si el valor es `int` y todavía no está en la lista, lo agrega. | Sin la función no hay filas. Si solo se quita `not in numeros`, el `10` repetido gana otra dirección. |
+| `if nodo.izquierda` y `if nodo.derecha` | Bajan a los hijos. | El lado que se quite no aporta números. Una fórmula con dos operandos perdería uno. |
+| `evaluate` | Si el nodo es entero, lo devuelve. Si no, evalúa izquierda, evalúa derecha y aplica el operador. | El resultado deja de calcularse. Gemini no tiene el 256 real. |
+| `if nodo.valor == "+"` , `"-"` y `"*"` | Suma, resta y multiplicación. | Esa operación desaparece. El flujo cae en la división y el resultado es falso, o lanza división entre cero. |
+| `if derecha == 0` | Impide dividir entre cero. | `10 / 0` revienta con la excepción de Python en vez del mensaje del compilador. |
+| `return int(resultado) if resultado.is_integer() else resultado` | `8 / 2` vuelve a `2`, no a `2.0`. `96 / 25` se queda en `3.84`. | Los cocientes exactos salen como reales. Algunas pruebas dejan de coincidir. |
+| `generate_machine_code` | Recorre en postorden y agrega `STORE R0`. | No hay lista de instrucciones. |
+| `emitir` | Si es número, `PUSH`. Si no, hijo izquierdo, hijo derecho y la instrucción del operador. | Sin el postorden, la pila no respeta el árbol. `MUL` podría ejecutarse antes de tener los dos números. |
+| `instrucciones.append("STORE R0")` | Guarda el valor final. | La pila calcula, pero nadie escribe el resultado en `R0`. |
+| `build_resolution_steps` | Lista cada reducción con la expresión que va quedando. | La construcción guiada pierde los pasos. La evaluación directa puede seguir. |
+| `aplanar` | Pone los números y, entre ellos, los operadores, en el orden del árbol. | El `while` no tiene qué reducir. |
+| `formatear_expresion` | El `for` pega número, operador, número. | Después de cada reducción no se puede mostrar la fórmula que queda. |
+| `while operadores` | Repite hasta que no queden operaciones. | Solo existiría la fórmula aplanada, sin el resultado intermedio. |
+| `prioridad = max(...)` | `*` y `/` valen 2. `+` y `-` valen 1. Se atiende primero la prioridad alta. | El primer operador de la izquierda se resolvería aunque fuera una suma, y `96 / 25` dejaría de ser el primer paso. |
+| `indice_operador = next(...)` | Entre las de la misma prioridad, toma la de más a la izquierda. | No habría un lugar concreto donde partir la fórmula. |
+| Los `if` de `+`, `-`, `*` y la división | Calculan ese paso. | El paso desaparece o se calcula con el operador equivocado. |
+| `if isinstance(resultado, float) and resultado.is_integer()` | Vuelve a entero cuando el decimal es `.0`. | Igual que en `evaluate`: los enteros exactos se ven como reales. |
+| `valores[indice : indice + 2] = [resultado]` y `operadores.pop` | Reemplaza los dos números por el resultado y quita el operador. | El `while` no acorta la fórmula y no termina. |
+
+### `ia.py`
+
+No tiene clases. Tiene funciones y varios `for`. Gemini no calcula: narra lo que ya calcularon los otros archivos.
+
+| Parte | Qué hace | Si se elimina, ¿sigue? |
+|---|---|---|
+| `load_dotenv(...)` | Lee `backend/.env` aunque el servidor arranque desde la raíz. | El compilador sigue. Gemini no ve la clave y cae al texto de respaldo, que la interfaz no muestra como IA. |
+| `_OPERACIONES_PILA` | Simula `ADD SUB MUL DIV` con los dos números de arriba de la pila. | El código máquina se genera igual. El rastro que recibe Gemini deja de tener el cálculo de cada línea. |
+| `format_number` | Igual que en semántica: entero limpio o decimal corto. | El rastro de la pila y el respaldo local no pueden escribir los números. |
+| `current_time_context` | Antes de las 12, «Buenos días». Antes de las 19, «Buenas tardes». Si no, «Buenas noches». El `for` de los tres saludos respeta el que ya trae el navegador. | Las explicaciones siguen, pero el saludo no cambia con la hora. |
+| La presentación | `{saludo}, hablas con la IA del simulador ArithLab+.` | Gemini abre con otra frase. El resto de la explicación puede seguir. |
+| `_enumerate_nodes` y `recorrer` | Preorden: nodo, izquierda, derecha. Numera N1, N2, N3. El `if not nodo` corta la recursión. | Gemini no puede nombrar cada bolita. El SVG sigue numerando por su cuenta. |
+| `_stack_trace` | El `for` recorre cada instrucción. Guarda la pila de antes, aplica `PUSH`, una operación o `STORE R0`, y guarda la pila de después. | La explicación del código máquina pierde el efecto real de cada línea. |
+| `if instruccion.startswith("PUSH ")` | Mete el número en la pila. | Los `PUSH` no cambian la pila simulada y las operaciones de después leen números equivocados. |
+| `elif instruccion in _OPERACIONES_PILA` | Saca dos valores, opera y deja el resultado. | `MUL`, `ADD` y `SUB` no se simulan. |
+| `elif instruccion == "STORE R0" and pila` | Anota el valor que queda en R0. | La última línea no dice en qué quedó el registro. |
+| `_model_candidates` | Primero el modelo del `.env`, luego `gemini-3.5-flash-lite`, `gemini-3.5-flash` y `gemini-flash-lite-latest`. El `for` quita repetidos. | No hay nombre para la URL de la API. No se puede llamar a Gemini. |
+| `_extract_response_text` | Lee `candidates[0].content.parts`. | La respuesta de Google llega y se tira. Las tarjetas quedan vacías. |
+| `_parse_json_object` | Acepta el JSON aunque venga entre comillas de código. Si `json.loads` falla, busca la primera `{` y la última `}`. | Un JSON válido envuelto se descarta y la explicación queda en error. |
+| `_post_prompt` | POST a `generateContent` con 25 segundos de espera. La clave va solo en esta URL. | No sale la llamada. No hay texto de IA. |
+| `_ask_gemini` | El `for` prueba cada modelo. El `except` guarda el fallo y sigue con el siguiente. Si nadie responde, lanza `RuntimeError`. | Un 404 del primer modelo deja la explicación sin intento de respaldo. |
+| `_ai_failure` | Devuelve textos vacíos, `modelo_ia` en `error` y el mensaje en `ia_error`. | Un fallo de red volvería a mostrar un párrafo escrito en el código, o la ruta se caería. |
+| `build_local_explanations` | Arma símbolo, pasos e instrucciones cuando no hay clave. | Las pruebas de error y el modo sin clave no tienen texto. Con clave, esta función no se usa. |
+| `_facts` | Junta fórmula, fichas, nodos, tablas, pasos, resultado, código y rastro. | Gemini puede responder, pero sin los números reales inventaría cifras. |
+| `_explanation_prompt` | Pide cinco textos. Cada uno debe empezar con la presentación. Pide un renglón por nodo, un renglón por símbolo y un bloque de cuatro líneas por instrucción. | La respuesta deja de obedecer la hora, la fórmula o el formato de las tarjetas. |
+| `_order_by_marker` | Si el texto ya tiene varios saltos, no se toca. Si Gemini lo pegó en un párrafo, lo parte en «El nodo» o «El número». | La explicación sigue, pero puede verse como un solo bloque. |
+| `_order_machine_explanation` | Parte por `01. PUSH` o por la palabra «Instrucción» cuando hay menos de cuatro saltos de línea. | El código máquina puede volver a mostrarse en un solo párrafo. |
+| `generate_explanation` | Si no hay clave, usa el respaldo. Si hay clave, pide el JSON y exige los cinco campos. | El botón Compilar no llena las tarjetas. |
+| `if not clave` | Elige el camino local. | Sin clave, la función intentaría llamar a Gemini con una clave vacía y fallaría. |
+| `if not objeto` | Rechaza una respuesta que no es JSON. | Un texto suelto se trataría como explicación y las tarjetas saldrían vacías o rotas. |
+| `if not texto_ia or not texto_arbol or not semantica or not tipos or not maquina` | Los cinco textos son obligatorios. | Una respuesta a medias se mostraría como si estuviera completa. |
+| `_CAMPOS_ERROR` | Las ocho claves de una fórmula inválida. | `/explicar-error` no sabe qué tarjetas pedir. |
+| `generate_error_explanation` | Con clave, pide las ocho explicaciones. Sin clave, escribe «no pudo compilarse» y marca el resto como fase detenida. | La vista de error solo mostraría el mensaje corto del léxico. |
+| `if not clave` dentro del error | Arma el texto que esperan las pruebas. | La prueba «no pudo compilarse» falla, y sin clave no hay explicación de respaldo. |
+| `if any(not campos[nombre] ...)` | Rechaza la respuesta si Gemini omitió una fase. | Una fase quedaría en blanco y la interfaz mostraría el aviso vacío. |
+
+Quitar `ia.py` completo no impide compilar. `/compilar` sigue devolviendo fichas, árbol, tablas, código y resultado. Dejan de existir `/explicar` y `/explicar-error`, porque `principal.py` las importa desde aquí.
+
+### `principal.py`
+
+La clase es `CompileRequest`. El objeto `app` no es una clase del compilador: es el servidor. Los condicionales están en las tres rutas.
+
+| Parte | Qué hace | Si se elimina, ¿sigue? |
+|---|---|---|
+| Imports de FastAPI, CORS y Pydantic | Publican las rutas y validan el cuerpo. | No. El servidor no arranca. |
+| Imports de `ia`, `lexico`, `sintactico` y `semantico` | Conectan las fases. | La fase cuyo import se quite desaparece. Sin `ia`, las dos rutas de explicación no existen. |
+| `app = FastAPI(...)` | Crea la API. Uvicorn busca este nombre. | No. `backend.principal:app` no tiene servidor. |
+| `CORSMiddleware` | Deja entrar a `localhost`, `127.0.0.1` y a `vercel.app`. | El navegador bloquea la respuesta. El backend sí compiló, pero la página no puede leerla. |
+| `GET /health` | Responde que el servicio está vivo. | Render deja de poder vigilar el servicio. Compilar desde el simulador sigue. |
+| Clase `CompileRequest` | Recibe la fórmula, la base de las posiciones y la hora. | No. Las rutas no tienen cuerpo que leer. |
+| `fuente` con alias `source` | La fórmula. Acepta el nombre en español y el que manda el navegador. Hasta 2000 caracteres. | El navegador envía `source` y Pydantic lo rechaza. No se compila. |
+| `base_cero` con alias `zero_based` | Pide posiciones desde 0. | El interruptor de la interfaz deja de tener efecto. Todo queda en base 1. |
+| `hora_cliente` | Texto del reloj del navegador, hasta 180 caracteres. | Gemini solo ve la hora del servidor. |
+| `_shift_position` | Resta 1 al número que está después de «posición». | La base cero no puede reescribir los mensajes. |
+| `_convert_error_positions` | Si `base_cero` es falso, devuelve los errores iguales. Si es verdadero, aplica la resta. | Con el interruptor activo, los mensajes seguirían en base 1 aunque las fichas ya estuvieran en base 0. |
+| `compile_expression` | Ordena léxico, parser, tablas, evaluación, código y pasos. | No existe `/compilar`. |
+| `if solicitud.base_cero` | Resta 1 a cada `posicion` y reescribe los mensajes. | El interruptor no cambia ninguna posición. |
+| Diccionario `respuesta` | Deja listas vacías y `modelo_ia` en `pendiente`. | No hay una forma estable de responder. |
+| `if not solicitud.fuente.strip()` | Entrada vacía o solo espacios. | Una caja vacía intentaría analizarse y el mensaje sería el del parser, no el de «escribe una expresión». |
+| `if errores_lexicos` | Corta antes del árbol. | El parser recibiría `$` o `&` y el error léxico se perdería o se mezclaría con uno sintáctico. |
+| `try` con `Parser`, `build_tables`, `evaluate`, `generate_machine_code` y `build_resolution_steps` | Llena la respuesta cuando la fórmula es válida. | Si se quita una llamada, esa parte de la respuesta queda vacía o en `None`. El resto puede seguir. |
+| `except (ValueError, ZeroDivisionError)` | Convierte el error de sintaxis o la división entre cero en `errores`. | Esos fallos salen como error 500 y la interfaz dice que el backend no está disponible. |
+| `explain_expression` | Vuelve a compilar y llama a `generate_explanation`. | Las tarjetas se quedan en «Consultando Gemini» o en el aviso de espera. Los números de `/compilar` siguen. |
+| `if compilado.get("errores") or compilado.get("ast") is None` | No pide una explicación de una fórmula que no compiló. | Gemini recibiría un árbol vacío e inventaría, o la llamada fallaría. |
+| `explain_error` | Pide el porqué de cada fase. | La caja de error solo muestra la frase corta del léxico. |
+| `if not compilado.get("errores")` | Si la fórmula es válida, no pide explicación de error. | Una fórmula buena gastaría una llamada de Gemini para decir que no hay error. |
+
+### `pruebas.py`
+
+La clase es `CompilerTests`. No compila el producto: comprueba que no se haya roto. Quitar el archivo no cambia el simulador. Quitar una prueba deja de vigilar ese caso.
+
+| Parte | Qué hace | Si se elimina, ¿sigue? |
+|---|---|---|
+| `setUp` | Saca `GEMINI_API_KEY` del entorno antes de cada prueba. | El simulador sigue. La prueba de error, si hay clave real, esperaría a Gemini y dejaría de revisar el texto local. |
+| `tearDown` | Devuelve la clave al terminar. | La clave se pierde para el proceso que ejecutó las pruebas. El código del compilador no cambia. |
+| `if self._clave_gemini is not None` | Solo restaura la clave si había una. | Si no había clave, escribiría `None` en el entorno y las pruebas siguientes se confundirían. |
+| Precedencia y símbolos | `10 + 25 * 10 - 4` debe tener 7 fichas, valer 256 y guardar 10, 25 y 4. | Esa garantía desaparece. Un cambio de prioridad podría colarse. |
+| Asociación izquierda | `100 - 20 - 5` debe valer 75 y `8 / 2 / 2` debe valer 2. | Se podría romper el `while` de restas o divisiones sin que nadie lo note. |
+| Errores léxicos | `7 $ 3 & 2` debe reportar la posición 3 y la 7. | El léxico podría detenerse en el primer error y la prueba no avisaría. |
+| Código de pila | Compara las ocho instrucciones, de `PUSH 10` a `STORE R0`. | Un cambio de orden en el postorden pasaría desapercibido. |
+| Pasos de resolución | El primer paso de la fórmula larga es `96 / 25 = 3.84` y el final es `14.84`. | Se podría atender la suma antes que la división sin una prueba que falle. |
+| Base cero | Las posiciones de error pasan a 2 y 6, y el `10` de `10 + 4` queda en la posición 0. | El interruptor podría restar mal y no habría aviso. |
+| Respaldo del error | El texto debe contener «no pudo compilarse» y «posición 3». | El mensaje local se podría cambiar y las pruebas seguirían en verde. |
+| `if __name__ == "__main__"` | Permite ejecutar este archivo directo. | `python -m unittest backend.pruebas` sigue funcionando. Solo se pierde el atajo de ejecutarlo como script. |
+
+Para correrlas, desde la raíz del proyecto:
+
+```powershell
+python -m unittest backend.pruebas
+```
