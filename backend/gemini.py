@@ -8,6 +8,7 @@ cuando el modelo responde. Si se elimina este archivo, las tres tarjetas
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -26,13 +27,6 @@ _STACK_OPS = {
     "MUL": ("*", lambda left, right: left * right),
     "DIV": ("/", lambda left, right: left / right),
 }
-
-_DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
-_MESES = (
-    "enero", "febrero", "marzo", "abril", "mayo", "junio",
-    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
-)
-
 
 def format_number(value: int | float) -> str:
     """Normaliza un número para que el texto de la IA no arrastre ceros de más.
@@ -54,24 +48,18 @@ def current_time_context(hora_cliente: str = "") -> dict[str, str]:
     now = datetime.now().astimezone()
     hour = now.hour
     if hour < 12:
-        saludo, momento = "Buenos días", "mañana"
+        saludo = "Buenos días"
     elif hour < 19:
-        saludo, momento = "Buenas tardes", "tarde"
+        saludo = "Buenas tardes"
     else:
-        saludo, momento = "Buenas noches", "noche"
-    fecha = (
-        f"{_DIAS[now.weekday()]} {now.day} de {_MESES[now.month - 1]} "
-        f"de {now.year}, {now.strftime('%H:%M')}"
-    )
-    zona = now.tzname() or "hora local"
-    reloj = hora_cliente.strip() or f"{saludo}. Ahora son las {fecha} ({zona}). Franja: {momento}."
-    return {
-        "saludo": saludo,
-        "momento": momento,
-        "fecha": fecha,
-        "zona": zona,
-        "reloj": reloj,
-    }
+        saludo = "Buenas noches"
+    texto = hora_cliente.strip().lower()
+    for option in ("Buenos días", "Buenas tardes", "Buenas noches"):
+        if texto.startswith(option.lower()):
+            saludo = option
+            break
+    presentacion = f"{saludo}, hablas con la IA del simulador ArithLab+."
+    return {"saludo": saludo, "presentacion": presentacion}
 
 
 def _enumerate_nodes(ast: dict | None) -> list[dict]:
@@ -327,28 +315,71 @@ def _explanation_prompt(source: str, result: dict, clock: dict[str, str]) -> str
     return (
         "Eres Gemini, profesor de Teoría de Compiladores. Escribe en español "
         "con tus propias frases. No copies un guion fijo.\n"
-        "Empieza CADA uno de los tres textos con el saludo y la hora exacta "
-        "de hora_de_quien_usa_el_simulador.reloj. No inventes otra hora.\n"
-        "Según la franja (mañana, tarde o noche) añade una sola frase de "
-        "contexto: en la mañana, que esta fórmula abre el laboratorio; en la "
-        "tarde, que sirve para repasar; en la noche, que conviene cerrar "
-        "revisando el resultado. Esa frase no cambia ningún cálculo.\n"
+        "Empieza CADA uno de los tres textos exactamente con "
+        f"«{clock['presentacion']}» y después sigue la explicación.\n"
+        "No escribas la fecha, la hora en números, «Franja del día» ni frases "
+        "como «la noche es el cierre», «abre el laboratorio» o «es un repaso».\n"
+        "No menciones nombres internos como arbol_en_texto, rastro_de_pila "
+        "o nodos_ast. Di «el árbol» y «la pila».\n"
         f"La fórmula exacta es: {source}\n"
         "Usa exclusivamente los datos JSON. No cambies tokens, nodos, "
         "direcciones, tipos, pasos, resultado ni instrucciones.\n"
         "explicacion_ia: fórmula exacta, luego cada nodo N1, N2... diciendo "
         "quién es su padre, y después la fórmula reducida paso a paso. Cada "
-        "paso debe repetir calculation y la expresión que queda.\n"
+        "paso debe repetir calculation y la expresión que queda. Separa cada "
+        "paso con un salto de línea.\n"
+        "explicacion_ast: explica por qué el árbol tiene esa forma. Di que * y / "
+        "quedan más abajo que + y - por la precedencia, y que las operaciones "
+        "iguales se agrupan de izquierda a derecha. Después, un renglón por nodo "
+        "del arbol_en_texto: qué valor tiene, quién es su padre y por qué está ahí.\n"
         "explicacion_semantica: fórmula exacta y, símbolo por símbolo, el "
         "número, su dirección dir_n y su tipo. Si un número se repite en la "
-        "fórmula, explica que reutiliza la misma dirección.\n"
-        "explicacion_codigo_maquina: fórmula exacta y cada instrucción en "
-        "orden, con la pila anterior, el cálculo y la pila posterior del "
-        "rastro_de_pila. Cierra con el valor guardado en R0.\n"
-        "Devuelve solo JSON con las claves explicacion_ia, "
-        "explicacion_semantica y explicacion_codigo_maquina.\n"
+        "fórmula, explica que reutiliza la misma dirección. Un renglón por símbolo.\n"
+        "explicacion_tipos: recorre la tabla de tipos de arriba abajo. Un renglón "
+        "por símbolo: el número, la fila y por qué su tipo es entero. Cierra "
+        "diciendo que un número repetido no crea otra fila.\n"
+        "explicacion_codigo_maquina: después de la frase inicial, una instrucción "
+        "por bloque y una línea en blanco entre bloques. Cada bloque tiene "
+        "exactamente estas cuatro líneas, con los datos de rastro_de_pila:\n"
+        "01. INSTRUCCION\n"
+        "Pila anterior: ...\n"
+        "Qué hace: ...\n"
+        "Pila después: ...\n"
+        "No escribas todas las instrucciones en el mismo párrafo.\n"
+        "Devuelve solo JSON con las claves explicacion_ia, explicacion_ast, "
+        "explicacion_semantica, explicacion_tipos y explicacion_codigo_maquina.\n"
         f"Datos reales:\n{json.dumps(_facts(source, result, clock), ensure_ascii=False)}"
     )
+
+
+def _order_by_marker(text: str, pattern: str) -> str:
+    """Parte un párrafo en renglones cuando Gemini no dejó saltos de línea.
+
+    Si el texto ya está en varios renglones, no se toca.
+    """
+    cleaned = text.replace("\\n", "\n").strip()
+    if cleaned.count("\n") >= 2:
+        return cleaned
+    chunks = [chunk.strip() for chunk in re.split(pattern, cleaned) if chunk.strip()]
+    if len(chunks) <= 1:
+        return cleaned
+    return "\n".join(chunks)
+
+
+def _order_machine_explanation(text: str) -> str:
+    """Separa cada instrucción en su propio bloque si Gemini las pegó en un párrafo.
+
+    Si el texto ya trae varios saltos de línea, se deja igual. Si se elimina,
+    la tarjeta de código máquina puede volver a mostrarse como un solo bloque.
+    """
+    cleaned = text.replace("\\n", "\n").strip()
+    if cleaned.count("\n") >= 4:
+        return cleaned
+    chunks = re.split(r"(?=Instrucción\b|\d{2}\.\s+(?:PUSH|ADD|SUB|MUL|DIV|STORE))", cleaned)
+    blocks = [chunk.strip() for chunk in chunks if chunk.strip()]
+    if len(blocks) <= 1:
+        return cleaned
+    return "\n\n".join(blocks)
 
 
 def generate_explanation(source: str, result: dict, hora_cliente: str = "") -> dict[str, str]:
@@ -374,13 +405,17 @@ def generate_explanation(source: str, result: dict, hora_cliente: str = "") -> d
         return _ai_failure("Gemini contestó, pero no entregó el JSON de las tres explicaciones.")
 
     ia = str(parsed.get("explicacion_ia", "")).strip()
+    ast = _order_by_marker(str(parsed.get("explicacion_ast", "")).strip(), r"(?=El nodo\b)")
     semantic = str(parsed.get("explicacion_semantica", "")).strip()
-    machine = str(parsed.get("explicacion_codigo_maquina", "")).strip()
-    if not ia or not semantic or not machine:
-        return _ai_failure("Gemini omitió una de las tres explicaciones pedidas.")
+    types = _order_by_marker(str(parsed.get("explicacion_tipos", "")).strip(), r"(?=El número\b|Cabe destacar)")
+    machine = _order_machine_explanation(str(parsed.get("explicacion_codigo_maquina", "")).strip())
+    if not ia or not ast or not semantic or not types or not machine:
+        return _ai_failure("Gemini omitió la explicación del árbol, de los tipos o del código máquina.")
     return {
         "explicacion_ia": ia,
+        "explicacion_ast": ast,
         "explicacion_semantica": semantic,
+        "explicacion_tipos": types,
         "explicacion_codigo_maquina": machine,
         "explicacion_error": "",
         "modelo_ia": model,
@@ -430,10 +465,11 @@ def generate_error_explanation(
     prompt = (
         "Eres Gemini, profesor de Teoría de Compiladores. Escribe en español, "
         "con tus propias frases. No inventes errores, tokens ni resultados.\n"
-        f"Empieza SOLO explicacion_error con esta hora, sin cambiarla: {clock['reloj']}\n"
-        "En esa misma clave añade una frase según la franja: mañana abre el "
-        "laboratorio, tarde es un repaso, noche es el cierre. Luego di el "
-        "error real, su posición y el cambio mínimo para dejar la fórmula válida.\n"
+        "Empieza SOLO explicacion_error exactamente con "
+        f"«{clock['presentacion']}» y después explica el error real, "
+        "su posición y el cambio mínimo para dejar la fórmula válida.\n"
+        "No escribas la fecha, la hora en números, «Franja del día» ni frases "
+        "como «la noche es el cierre», «abre el laboratorio» o «es un repaso».\n"
         "Las otras claves NO repiten el saludo. Cada una explica, en un párrafo, "
         "por qué ESA fase queda vacía o incompleta a causa de los errores reales.\n"
         "Este compilador solo acepta números enteros y los operadores + - * /. "

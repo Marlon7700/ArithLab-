@@ -538,6 +538,7 @@ export default function App() {
       <section id="ast-step" className="panel ast-panel"><div className="panel-heading"><div><span className="kicker">03 / SINTAXIS</span><h3>Árbol de sintaxis abstracta <span className="mini-tag">SVG</span></h3></div><span className="ast-legend"><i className="cream-dot" /> número <i className="lilac-dot" /> operador</span></div>
         <div className="ast-stage">{result.ast ? <AstSvg node={result.ast} activeToken={activeToken} /> : <div className="empty-ast"><div>⌁</div><p>{hasErrors ? "El AST no se construyó" : "El AST aparecerá aquí"}</p><small>{hasErrors ? "El parser se detiene porque la fórmula tiene errores." : "Compila una expresión para visualizar su estructura."}</small></div>}</div>
         <pre className="ast-text">{result.ast_text || (hasErrors ? (aiLoading ? aiWait : (astExplanation || result.ia_error || "Gemini explicará por qué no hay árbol.")) : "└── esperando entrada...")}</pre>
+        {(result.ast || hasErrors) && <pre className="semantic-process ast-why">{aiLoading ? aiWait : (astExplanation || result.ia_error || "Gemini explicará por qué el árbol queda con esta forma.")}</pre>}
       </section>
       <section id="semantic-step" className="semantic-grid">
         <Table title="04 / Tabla semántica" headers={["Símbolo", "Dirección"]} rows={result.simbolos.map((item) => [item.symbol, <code>{item.address}</code>])} empty={hasErrors ? "Sin símbolos: el análisis no llegó a esta fase." : "Sin datos todavía"} />
@@ -550,7 +551,13 @@ export default function App() {
           <div className="formula-banner"><span>FÓRMULA</span><code>{source || "—"}</code></div>
           <pre className="typed-process">{aiLoading ? aiWait : (typedProcess || result.ia_error || "Compila una expresión para que Gemini explique la fórmula paso a paso.")}</pre>
       </section>
-      <section id="types-step" className="types-grid"><Table title="06 / Tabla de tipos" headers={["Símbolo", "Tipo"]} rows={result.tipos.map((item) => [item.symbol, <span className="type-pill">{item.type}</span>])} empty={hasErrors ? "Sin tipos: no hay símbolos que clasificar." : "Sin datos todavía"} />{hasErrors && <pre className="semantic-process">{aiLoading ? aiWait : (typesExplanation || result.ia_error || "Gemini explicará por qué no hay tipos.")}</pre>}</section>
+      <section id="types-step" className="types-grid">
+        <Table title="06 / Tabla de tipos" headers={["Símbolo", "Tipo"]} rows={result.tipos.map((item) => [item.symbol, <span className="type-pill">{item.type}</span>])} empty={hasErrors ? "Sin tipos: no hay símbolos que clasificar." : "Sin datos todavía"} />
+        <div className="panel semantic-explanation"><div className="panel-heading"><div><span className="kicker">06 / TIPOS</span><h3>Por qué cada símbolo es entero</h3></div><span className="ai-badge">{aiLoading ? "✦ CONSULTANDO GEMINI" : geminiListo ? `✦ ${result.modelo_ia}` : "✦ GEMINI"}</span></div>
+          <div className="formula-banner"><span>FÓRMULA</span><code>{source || "—"}</code></div>
+          <pre className="semantic-process">{aiLoading ? aiWait : (typesExplanation || result.ia_error || "Compila una expresión para que Gemini explique, fila por fila, por qué cada tipo es entero.")}</pre>
+        </div>
+      </section>
       <section id="machine-step" className="machine-grid">
         <div className="panel machine-panel"><div className="panel-heading"><div><span className="kicker">07 / GENERACIÓN</span><h3>Código máquina</h3></div><span className="machine-badge">STACK VM</span></div>
           <div className="machine-code">{result.codigo_maquina?.length ? result.codigo_maquina.map((instruction, index) => <div className="machine-line" key={`${instruction}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><code>{instruction}</code><i>{instruction.startsWith("PUSH") ? "cargar" : instruction === "STORE R0" ? "guardar" : "operar"}</i></div>) : <span className="muted">{hasErrors ? (aiLoading ? aiWait : (machineExplanation || "No hay instrucciones porque la fórmula tiene errores.")) : "Las instrucciones aparecerán después de compilar."}</span>}</div>

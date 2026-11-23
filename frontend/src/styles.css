@@ -94,8 +94,9 @@ body{font-size:15px}.sidebar{font-size:15px}.brand p{font-size:12px}.nav-item{fo
 .semantic-grid>.table-panel{min-height:250px}
 .semantic-explanation{min-height:250px}
 .semantic-process{white-space:pre-wrap;color:#dce7f5;font:13px/1.75 'DM Sans';margin:0;min-height:138px}
-.types-grid{width:100%}
+.types-grid{width:100%;display:grid;gap:15px}
 .types-grid>.table-panel{width:100%}
+.ast-why{margin-top:14px;min-height:0}
 .main-content>.process-panel,.main-content>.machine-panel{min-height:auto}
 .main-content>.machine-panel{margin-bottom:0}
 .main-content>.result-card{margin-bottom:0;text-align:left}
