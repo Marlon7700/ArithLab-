@@ -388,16 +388,30 @@ def generate_explanation(source: str, result: dict, hora_cliente: str = "") -> d
     }
 
 
+_ERROR_FIELDS = (
+    "explicacion_error",
+    "explicacion_tokens",
+    "explicacion_ast",
+    "explicacion_semantica",
+    "explicacion_ia",
+    "explicacion_tipos",
+    "explicacion_codigo_maquina",
+    "explicacion_resultado",
+)
+
+
 def generate_error_explanation(
     source: str,
     errors: list[str],
     zero_based: bool,
     hora_cliente: str = "",
+    tokens: list | None = None,
 ) -> dict[str, str]:
-    """Pide a Gemini que explique los errores reales de una fórmula inválida.
+    """Pide a Gemini por qué falló cada fase: léxico, AST, tablas, pila y resultado.
 
-    La llama POST /explicar-error. Sin clave, devuelve el texto que esperan
-    las pruebas. Si se elimina, la vista Errores no puede decir por qué falló.
+    La llama POST /explicar-error. Sin clave, el texto de explicacion_error
+    es el que esperan las pruebas. Si se elimina un campo del JSON, esa
+    tarjeta de la interfaz se queda en el aviso vacío.
     """
     base = "desde cero (0)" if zero_based else "desde uno (1)"
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
@@ -407,25 +421,45 @@ def generate_error_explanation(
             f"Las posiciones se cuentan {base}.\n"
             + "\n".join(f"• {error}" for error in errors)
         )
-        return {"explicacion_error": local, "modelo_ia": "determinista", "ia_error": ""}
+        stopped = "Esta fase no corre porque el análisis anterior ya falló."
+        fields = {name: stopped for name in _ERROR_FIELDS}
+        fields["explicacion_error"] = local
+        return {**fields, "modelo_ia": "determinista", "ia_error": ""}
 
     clock = current_time_context(hora_cliente)
     prompt = (
         "Eres Gemini, profesor de Teoría de Compiladores. Escribe en español, "
-        "con tus palabras, 2 o 3 párrafos.\n"
-        f"Empieza con esta hora, sin cambiarla: {clock['reloj']}\n"
-        "Según la franja, una frase breve: mañana abre el laboratorio, "
-        "tarde es un repaso, noche es el cierre. Después explica solo los "
-        "errores entregados, su posición y el cambio mínimo para que la "
-        f"fórmula quede válida. Base de posiciones: {base}.\n"
-        "No inventes otros errores. Responde en texto plano, sin JSON.\n"
-        f"Entrada: {source}\n"
+        "con tus propias frases. No inventes errores, tokens ni resultados.\n"
+        f"Empieza SOLO explicacion_error con esta hora, sin cambiarla: {clock['reloj']}\n"
+        "En esa misma clave añade una frase según la franja: mañana abre el "
+        "laboratorio, tarde es un repaso, noche es el cierre. Luego di el "
+        "error real, su posición y el cambio mínimo para dejar la fórmula válida.\n"
+        "Las otras claves NO repiten el saludo. Cada una explica, en un párrafo, "
+        "por qué ESA fase queda vacía o incompleta a causa de los errores reales.\n"
+        "Este compilador solo acepta números enteros y los operadores + - * /. "
+        "No menciones identificadores, variables, alcance ni ejecutables.\n"
+        "explicacion_tokens: qué números u operadores sí se reconocieron y "
+        "qué caracteres no pueden ser token.\n"
+        "explicacion_ast: por qué el parser no construye el árbol.\n"
+        "explicacion_semantica: por qué no hay símbolos ni direcciones dir_n.\n"
+        "explicacion_ia: por qué no se puede reducir la fórmula paso a paso.\n"
+        "explicacion_tipos: por qué no hay tipos entero.\n"
+        "explicacion_codigo_maquina: por qué no hay PUSH, ADD, SUB, MUL, DIV ni STORE R0.\n"
+        "explicacion_resultado: por qué no hay un número final.\n"
+        f"Base de posiciones: {base}. Fórmula exacta: {source}\n"
+        "Devuelve solo JSON con esas ocho claves.\n"
+        f"Tokens reconocidos: {json.dumps(tokens or [], ensure_ascii=False)}\n"
         f"Errores reales: {json.dumps(errors, ensure_ascii=False)}"
     )
     try:
-        text, model = _ask_gemini(api_key, prompt, "text/plain")
+        text, model = _ask_gemini(api_key, prompt, "application/json")
     except RuntimeError as error:
         return _ai_failure(f"Gemini no pudo explicar el error. {error}")
-    if not text:
-        return _ai_failure("Gemini no escribió la explicación del error.")
-    return {"explicacion_error": text, "modelo_ia": model, "ia_error": ""}
+
+    parsed = _parse_json_object(text)
+    if not parsed:
+        return _ai_failure("Gemini contestó, pero no entregó la explicación de cada fase.")
+    fields = {name: str(parsed.get(name, "")).strip() for name in _ERROR_FIELDS}
+    if any(not fields[name] for name in _ERROR_FIELDS):
+        return _ai_failure("Gemini omitió la explicación de alguna fase con error.")
+    return {**fields, "modelo_ia": model, "ia_error": ""}

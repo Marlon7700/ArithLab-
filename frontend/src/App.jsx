@@ -11,7 +11,7 @@ const examples = [
   ["Con error", "7 $ 3 & 2"],
 ];
 
-const emptyResult = { tokens: [], ast: null, ast_text: "", simbolos: [], tipos: [], errores: [], resultado: null, codigo_maquina: [], pasos_resolucion: [], explicacion_ia: "", explicacion_semantica: "", explicacion_codigo_maquina: "", explicacion_error: "", ia_error: "", modelo_ia: "pendiente", base_posiciones: 1 };
+const emptyResult = { tokens: [], ast: null, ast_text: "", simbolos: [], tipos: [], errores: [], resultado: null, codigo_maquina: [], pasos_resolucion: [], explicacion_ia: "", explicacion_semantica: "", explicacion_codigo_maquina: "", explicacion_error: "", explicacion_tokens: "", explicacion_ast: "", explicacion_tipos: "", explicacion_resultado: "", ia_error: "", modelo_ia: "pendiente", base_posiciones: 1 };
 
 // Reloj del navegador. Se envía a Gemini para que el saludo coincida con
 // la hora de quien usa el simulador, no con un texto fijo.
@@ -348,10 +348,17 @@ export default function App() {
   // Si se vuelve a poner un párrafo local en estos tres valores, la pantalla
   // deja de esperar la respuesta de la IA y vuelve a enseñar un texto fijo.
   const geminiListo = String(result.modelo_ia || "").startsWith("gemini");
+  const hasErrors = result.errores.length > 0;
   const processText = geminiListo ? result.explicacion_ia : "";
   const semanticExplanation = geminiListo ? result.explicacion_semantica : "";
   const machineExplanation = geminiListo ? result.explicacion_codigo_maquina : "";
-  const aiWait = `Gemini está redactando la fórmula ${source || ""} paso a paso. ${clockLabel}.`;
+  const tokenExplanation = geminiListo ? result.explicacion_tokens : "";
+  const astExplanation = geminiListo ? result.explicacion_ast : "";
+  const typesExplanation = geminiListo ? result.explicacion_tipos : "";
+  const resultExplanation = geminiListo ? result.explicacion_resultado : "";
+  const aiWait = hasErrors
+    ? `Gemini está explicando por qué cada fase se detiene con esta fórmula. ${clockLabel}.`
+    : `Gemini está redactando la fórmula ${source || ""} paso a paso. ${clockLabel}.`;
 
   useEffect(() => {
     const tick = () => setClockLabel(clientClock().label);
@@ -400,6 +407,10 @@ export default function App() {
         explicacion_semantica: "",
         explicacion_codigo_maquina: "",
         explicacion_error: "",
+        explicacion_tokens: "",
+        explicacion_ast: "",
+        explicacion_tipos: "",
+        explicacion_resultado: "",
         ia_error: "",
         modelo_ia: "pendiente",
       });
@@ -426,6 +437,10 @@ export default function App() {
             explicacion_semantica: improved.explicacion_semantica || "",
             explicacion_codigo_maquina: improved.explicacion_codigo_maquina || "",
             explicacion_error: improved.explicacion_error || "",
+            explicacion_tokens: improved.explicacion_tokens || "",
+            explicacion_ast: improved.explicacion_ast || "",
+            explicacion_tipos: improved.explicacion_tipos || "",
+            explicacion_resultado: improved.explicacion_resultado || "",
             ia_error: "",
             modelo_ia: modelName,
           }));
@@ -463,7 +478,6 @@ export default function App() {
     status: result.errores.length ? "Error" : result.ast ? "Listo" : "—",
   }), [result]);
   const pipeline = ["Entrada", "Tokens", "AST", "Semántica", "Construcción", "Tipos", "Código", "Resultado"];
-  const hasErrors = result.errores.length > 0;
   const stepMenu = [
     ["Entrada", "entrada-step", "▦"],
     ["Tokens", "tokens-step", "⌘"],
@@ -520,13 +534,13 @@ export default function App() {
             <p className="error-ai"><b>Explicación IA:</b> {aiLoading ? aiWait : (result.explicacion_error || result.ia_error || "Gemini todavía no explica este error.")}</p>
           </div>}
       </section>
-      <section id="tokens-step" className="section-block"><div className="section-title"><span className="kicker">02 / LÉXICO</span><h3>Tokens identificados</h3></div><div className="token-list">{result.tokens.length ? result.tokens.map((token, index) => <button className={`token-chip ${token.type === "NÚMERO" ? "number-chip" : "operator-chip"}`} key={`${token.position}-${index}`} onMouseEnter={() => setActiveToken(token.value)} onMouseLeave={() => setActiveToken(null)}><small>{String(index + 1).padStart(2, "0")}</small>{token.value}<em>{token.type}</em></button>) : <span className="muted">Los tokens aparecerán después de compilar.</span>}</div></section>
+      <section id="tokens-step" className="section-block"><div className="section-title"><span className="kicker">02 / LÉXICO</span><h3>Tokens identificados</h3></div><div className="token-list">{result.tokens.length ? result.tokens.map((token, index) => <button className={`token-chip ${token.type === "NÚMERO" ? "number-chip" : "operator-chip"}`} key={`${token.position}-${index}`} onMouseEnter={() => setActiveToken(token.value)} onMouseLeave={() => setActiveToken(null)}><small>{String(index + 1).padStart(2, "0")}</small>{token.value}<em>{token.type}</em></button>) : <span className="muted">{hasErrors ? "No quedó una lista completa de tokens." : "Los tokens aparecerán después de compilar."}</span>}</div>{hasErrors && <pre className="semantic-process">{aiLoading ? aiWait : (tokenExplanation || result.ia_error || "Gemini explicará qué caracteres no pudieron ser token.")}</pre>}</section>
       <section id="ast-step" className="panel ast-panel"><div className="panel-heading"><div><span className="kicker">03 / SINTAXIS</span><h3>Árbol de sintaxis abstracta <span className="mini-tag">SVG</span></h3></div><span className="ast-legend"><i className="cream-dot" /> número <i className="lilac-dot" /> operador</span></div>
-        <div className="ast-stage">{result.ast ? <AstSvg node={result.ast} activeToken={activeToken} /> : <div className="empty-ast"><div>⌁</div><p>El AST aparecerá aquí</p><small>Compila una expresión para visualizar su estructura.</small></div>}</div>
-        <pre className="ast-text">{result.ast_text || "└── esperando entrada..."}</pre>
+        <div className="ast-stage">{result.ast ? <AstSvg node={result.ast} activeToken={activeToken} /> : <div className="empty-ast"><div>⌁</div><p>{hasErrors ? "El AST no se construyó" : "El AST aparecerá aquí"}</p><small>{hasErrors ? "El parser se detiene porque la fórmula tiene errores." : "Compila una expresión para visualizar su estructura."}</small></div>}</div>
+        <pre className="ast-text">{result.ast_text || (hasErrors ? (aiLoading ? aiWait : (astExplanation || result.ia_error || "Gemini explicará por qué no hay árbol.")) : "└── esperando entrada...")}</pre>
       </section>
       <section id="semantic-step" className="semantic-grid">
-        <Table title="04 / Tabla semántica" headers={["Símbolo", "Dirección"]} rows={result.simbolos.map((item) => [item.symbol, <code>{item.address}</code>])} />
+        <Table title="04 / Tabla semántica" headers={["Símbolo", "Dirección"]} rows={result.simbolos.map((item) => [item.symbol, <code>{item.address}</code>])} empty={hasErrors ? "Sin símbolos: el análisis no llegó a esta fase." : "Sin datos todavía"} />
         <div className="panel semantic-explanation"><div className="panel-heading"><div><span className="kicker">04 / ANÁLISIS SEMÁNTICO</span><h3>Cómo se construyó la tabla</h3></div><span className="ai-badge">{aiLoading ? "✦ CONSULTANDO GEMINI" : geminiListo ? `✦ ${result.modelo_ia}` : "✦ GEMINI"}</span></div>
           <div className="formula-banner"><span>FÓRMULA</span><code>{source || "—"}</code></div>
           <pre className="semantic-process">{aiLoading ? aiWait : (semanticExplanation || result.ia_error || "Compila una expresión para que Gemini explique cada símbolo, su dirección y su tipo.")}</pre>
@@ -536,16 +550,16 @@ export default function App() {
           <div className="formula-banner"><span>FÓRMULA</span><code>{source || "—"}</code></div>
           <pre className="typed-process">{aiLoading ? aiWait : (typedProcess || result.ia_error || "Compila una expresión para que Gemini explique la fórmula paso a paso.")}</pre>
       </section>
-      <section id="types-step" className="types-grid"><Table title="06 / Tabla de tipos" headers={["Símbolo", "Tipo"]} rows={result.tipos.map((item) => [item.symbol, <span className="type-pill">{item.type}</span>])} /></section>
+      <section id="types-step" className="types-grid"><Table title="06 / Tabla de tipos" headers={["Símbolo", "Tipo"]} rows={result.tipos.map((item) => [item.symbol, <span className="type-pill">{item.type}</span>])} empty={hasErrors ? "Sin tipos: no hay símbolos que clasificar." : "Sin datos todavía"} />{hasErrors && <pre className="semantic-process">{aiLoading ? aiWait : (typesExplanation || result.ia_error || "Gemini explicará por qué no hay tipos.")}</pre>}</section>
       <section id="machine-step" className="machine-grid">
         <div className="panel machine-panel"><div className="panel-heading"><div><span className="kicker">07 / GENERACIÓN</span><h3>Código máquina</h3></div><span className="machine-badge">STACK VM</span></div>
-          <div className="machine-code">{result.codigo_maquina?.length ? result.codigo_maquina.map((instruction, index) => <div className="machine-line" key={`${instruction}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><code>{instruction}</code><i>{instruction.startsWith("PUSH") ? "cargar" : instruction === "STORE R0" ? "guardar" : "operar"}</i></div>) : <span className="muted">Las instrucciones aparecerán después de compilar.</span>}</div>
+          <div className="machine-code">{result.codigo_maquina?.length ? result.codigo_maquina.map((instruction, index) => <div className="machine-line" key={`${instruction}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><code>{instruction}</code><i>{instruction.startsWith("PUSH") ? "cargar" : instruction === "STORE R0" ? "guardar" : "operar"}</i></div>) : <span className="muted">{hasErrors ? (aiLoading ? aiWait : (machineExplanation || "No hay instrucciones porque la fórmula tiene errores.")) : "Las instrucciones aparecerán después de compilar."}</span>}</div>
         </div>
         <div className="panel machine-explanation"><div className="panel-heading"><div><span className="kicker">07 / CONSTRUCCIÓN GUIADA</span><h3>Cómo se arma el código máquina</h3></div><span className="ai-badge">{aiLoading ? "✦ CONSULTANDO GEMINI" : geminiListo ? `✦ ${result.modelo_ia}` : "✦ GEMINI"}</span></div>
           <pre className="machine-process">{aiLoading ? aiWait : (machineExplanation || result.ia_error || "Compila una expresión para que Gemini explique cada instrucción de la pila.")}</pre>
         </div>
       </section>
-      <section id="result-step" className="result-card"><span className="kicker">08 / RESULTADO</span><h3>Resultado final</h3><strong>{result.resultado ?? "—"}</strong><p>{result.resultado !== null ? "AST evaluado correctamente" : "Sin resultado disponible"}</p></section>
+      <section id="result-step" className="result-card"><span className="kicker">08 / RESULTADO</span><h3>Resultado final</h3><strong>{result.resultado ?? "—"}</strong><p>{result.resultado !== null ? "AST evaluado correctamente" : (hasErrors ? (aiLoading ? aiWait : (resultExplanation || result.ia_error || "No hay resultado porque la fórmula tiene errores.")) : "Sin resultado disponible")}</p></section>
       </>}
       <footer>ArithLab+ · Simulador educativo de teoría de compiladores <span>Lexer · Parser · Semántica</span></footer>
     </main>

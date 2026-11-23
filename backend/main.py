@@ -150,4 +150,5 @@ def explain_error(request: CompileRequest) -> dict:
         compiled["errores"],
         request.zero_based,
         request.hora_cliente,
+        compiled.get("tokens") or [],
     )
