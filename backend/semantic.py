@@ -1,9 +1,26 @@
-"""Construcción de tablas semánticas y evaluación del AST."""
+"""Tablas semánticas, evaluación y código de la máquina de pila.
+
+compile_expression usa build_tables, evaluate, generate_machine_code y
+build_resolution_steps. Gemini recibe ese resultado y lo narra; no lo calcula.
+Si se elimina este módulo, no hay direcciones, tipos, resultado ni instrucciones.
+"""
 
 from .parser import ASTNode
 
+_MACHINE_OPS = {"+": "ADD", "-": "SUB", "*": "MUL", "/": "DIV"}
+
+
+def _format_number(value: int | float) -> str:
+    """Escribe un entero sin decimales y un decimal sin ceros de más."""
+    return str(value) if isinstance(value, int) else f"{value:.10g}"
+
 
 def build_tables(ast: ASTNode) -> tuple[list[dict], list[dict]]:
+    """Arma la tabla de símbolos (dir_1, dir_2...) y la de tipos (entero).
+
+    Un número repetido no gana otra dirección: _collect_numbers lo ignora.
+    Si se elimina, las tablas 04 y 06 de la interfaz quedan vacías.
+    """
     numbers: list[int] = []
     _collect_numbers(ast, numbers)
     symbols = [
@@ -15,6 +32,10 @@ def build_tables(ast: ASTNode) -> tuple[list[dict], list[dict]]:
 
 
 def _collect_numbers(node: ASTNode, numbers: list[int]) -> None:
+    """Junta los enteros distintos en el orden en que aparecen en el árbol.
+
+    Si se quita la condición «not in numbers», 10 + 25 * 10 crearía dos dir para el 10.
+    """
     if isinstance(node.value, int) and node.value not in numbers:
         numbers.append(node.value)
     if node.left:
@@ -24,6 +45,11 @@ def _collect_numbers(node: ASTNode, numbers: list[int]) -> None:
 
 
 def evaluate(node: ASTNode) -> int | float:
+    """Calcula el valor del árbol: primero los hijos y después el operador.
+
+    El resultado 256 de 10 + 25 * 10 - 4 sale de aquí, no de Gemini.
+    Si se elimina el caso de un operador, esa operación dejaría de resolverse.
+    """
     if isinstance(node.value, int):
         return node.value
     left = evaluate(node.left)  # type: ignore[arg-type]
@@ -41,7 +67,11 @@ def evaluate(node: ASTNode) -> int | float:
 
 
 def generate_machine_code(node: ASTNode) -> list[str]:
-    """Genera instrucciones de una máquina de pila para ejecutar el AST."""
+    """Emite PUSH, ADD, SUB, MUL, DIV y STORE R0 en postorden.
+
+    Visita el hijo izquierdo, el derecho y al final el operador.
+    Si se quita STORE R0, la pila calcula el valor pero nadie lo guarda en R0.
+    """
     instructions: list[str] = []
 
     def emit(current: ASTNode) -> None:
@@ -50,13 +80,7 @@ def generate_machine_code(node: ASTNode) -> list[str]:
             return
         emit(current.left)  # type: ignore[arg-type]
         emit(current.right)  # type: ignore[arg-type]
-        operation = {
-            "+": "ADD",
-            "-": "SUB",
-            "*": "MUL",
-            "/": "DIV",
-        }[current.value]
-        instructions.append(operation)
+        instructions.append(_MACHINE_OPS[str(current.value)])
 
     emit(node)
     instructions.append("STORE R0")
@@ -64,7 +88,12 @@ def generate_machine_code(node: ASTNode) -> list[str]:
 
 
 def build_resolution_steps(node: ASTNode) -> list[dict[str, str]]:
-    """Reduce la expresión respetando precedencia y asociatividad izquierda."""
+    """Lista cada reducción de la fórmula, con la expresión que va quedando.
+
+    Primero * y /, después + y - de izquierda a derecha. Gemini debe narrar
+    estos pasos tal cual. Si se elimina el criterio de prioridad, el orden
+    de los pasos dejaría de coincidir con el árbol.
+    """
     values: list[int | float] = []
     operators: list[str] = []
 
@@ -79,13 +108,10 @@ def build_resolution_steps(node: ASTNode) -> list[dict[str, str]]:
     flatten(node)
     steps: list[dict[str, str]] = []
 
-    def format_number(value: int | float) -> str:
-        return str(value) if isinstance(value, int) else f"{value:.10g}"
-
     def format_expression() -> str:
-        parts: list[str] = [format_number(values[0])]
+        parts: list[str] = [_format_number(values[0])]
         for index, operator in enumerate(operators):
-            parts.extend([operator, format_number(values[index + 1])])
+            parts.extend([operator, _format_number(values[index + 1])])
         return " ".join(parts)
 
     while operators:
@@ -108,7 +134,10 @@ def build_resolution_steps(node: ASTNode) -> list[dict[str, str]]:
             result = left / right
         if isinstance(result, float) and result.is_integer():
             result = int(result)
-        calculation = f"{format_number(left)} {operator} {format_number(right)} = {format_number(result)}"
+        calculation = (
+            f"{_format_number(left)} {operator} {_format_number(right)} "
+            f"= {_format_number(result)}"
+        )
         values[operator_index:operator_index + 2] = [result]
         operators.pop(operator_index)
         steps.append({

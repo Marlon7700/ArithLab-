@@ -1,4 +1,9 @@
-"""API FastAPI del simulador de compilador aritmético."""
+"""API FastAPI del simulador de compilador aritmético.
+
+/compilar solo calcula tokens, AST, tablas, código máquina y resultado.
+Las frases de las tarjetas salen de /explicar y /explicar-error, que llaman
+a Gemini. Si se elimina la importación de gemini, esas dos rutas dejan de existir.
+"""
 
 import re
 
@@ -6,10 +11,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from .gemini import generate_error_explanation, generate_explanation
 from .lexer import Token, token_as_dict, tokenize
 from .parser import Parser, ast_to_text
-from .semantic import build_tables, evaluate, generate_machine_code, build_resolution_steps
-from .gemini import build_local_explanations, generate_explanation, generate_error_explanation
+from .semantic import build_resolution_steps, build_tables, evaluate, generate_machine_code
 
 app = FastAPI(title="ArithLab+ API", version="1.0.0")
 app.add_middleware(
@@ -21,31 +26,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/health")
 def health() -> dict:
     return {"ok": True, "service": "arithlab-backend"}
 
 
 class CompileRequest(BaseModel):
+    """Cuerpo que envía App.jsx al compilar o al pedir la explicación.
+
+    hora_cliente es el reloj del navegador. Si se elimina ese campo, Gemini
+    solo ve la hora del servidor y no la de quien está frente a la pantalla.
+    """
+
     source: str = Field(default="", max_length=2000)
     zero_based: bool = Field(default=False)
+    hora_cliente: str = Field(default="", max_length=180)
+
+
+def _shift_position(match: re.Match[str]) -> str:
+    """Resta 1 a la posición escrita en un mensaje de error."""
+    return f"posición {int(match.group(1)) - 1}"
 
 
 def _convert_error_positions(errors: list[str], zero_based: bool) -> list[str]:
+    """Pasa las posiciones de base 1 a base 0 cuando el cliente lo pide."""
     if not zero_based:
         return errors
-
-    converted: list[str] = []
-    for error in errors:
-        def replace(match: re.Match[str]) -> str:
-            return f"posición {int(match.group(1)) - 1}"
-
-        converted.append(re.sub(r"posición (\d+)", replace, error))
-    return converted
+    return [re.sub(r"posición (\d+)", _shift_position, error) for error in errors]
 
 
 @app.post("/compilar")
 def compile_expression(request: CompileRequest) -> dict:
+    """Ejecuta lexer, parser, tablas, evaluación y código máquina.
+
+    No redacta la explicación: deja esos campos vacíos para que /explicar
+    los llene con Gemini. Si se elimina el llamado a tokenize o a Parser,
+    la respuesta llega sin tokens o sin árbol.
+    """
     tokens, lexical_errors = tokenize(request.source)
     if request.zero_based:
         tokens = [
@@ -66,8 +84,9 @@ def compile_expression(request: CompileRequest) -> dict:
         "explicacion_ia": "",
         "explicacion_semantica": "",
         "explicacion_codigo_maquina": "",
-        "modelo_ia": "determinista",
+        "modelo_ia": "pendiente",
         "explicacion_error": "",
+        "ia_error": "",
         "base_posiciones": 0 if request.zero_based else 1,
     }
 
@@ -89,7 +108,6 @@ def compile_expression(request: CompileRequest) -> dict:
             codigo_maquina=generate_machine_code(ast),
             pasos_resolucion=build_resolution_steps(ast),
         )
-        response.update(build_local_explanations(request.source, response))
     except (ValueError, ZeroDivisionError) as error:
         response["errores"] = [str(error)]
     return response
@@ -97,26 +115,39 @@ def compile_expression(request: CompileRequest) -> dict:
 
 @app.post("/explicar")
 def explain_expression(request: CompileRequest) -> dict:
+    """Vuelve a compilar y le pasa a Gemini los datos reales y la hora del cliente.
+
+    App.jsx llama esta ruta justo después de /compilar. Si se elimina,
+    las tarjetas se quedan en el mensaje de espera.
+    """
     compiled = compile_expression(request)
     if compiled.get("errores") or compiled.get("ast") is None:
         return {
             "explicacion_ia": "",
             "explicacion_semantica": "",
             "explicacion_codigo_maquina": "",
+            "modelo_ia": "error",
+            "ia_error": "No hay una fórmula válida para que Gemini la explique.",
         }
-    return generate_explanation(request.source, compiled)
+    return generate_explanation(request.source, compiled, request.hora_cliente)
 
 
 @app.post("/explicar-error")
 def explain_error(request: CompileRequest) -> dict:
+    """Pide a Gemini el porqué de los errores léxicos o sintácticos.
+
+    Si se elimina, la vista Errores solo lista el mensaje del lexer.
+    """
     compiled = compile_expression(request)
     if not compiled.get("errores"):
         return {
             "explicacion_error": "La expresión no contiene errores.",
             "modelo_ia": "determinista",
+            "ia_error": "",
         }
     return generate_error_explanation(
         request.source,
         compiled["errores"],
         request.zero_based,
+        request.hora_cliente,
     )

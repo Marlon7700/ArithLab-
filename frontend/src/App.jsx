@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 
-// En desarrollo se llama directamente a FastAPI. En despliegue se configura
-// VITE_API_URL con la URL pública del backend.
+// App.jsx pinta el simulador y pide dos cosas al backend: /compilar calcula
+// la fórmula y /explicar (o /explicar-error) trae el texto de Gemini.
+// Si se quita API_URL, el navegador no sabe a qué puerto hablar.
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const examples = [
   ["Válido", "10 + 25 * 10 - 4"],
@@ -10,16 +11,32 @@ const examples = [
   ["Con error", "7 $ 3 & 2"],
 ];
 
-const emptyResult = { tokens: [], ast: null, ast_text: "", simbolos: [], tipos: [], errores: [], resultado: null, codigo_maquina: [], pasos_resolucion: [], explicacion_ia: "", explicacion_semantica: "", explicacion_codigo_maquina: "", explicacion_error: "", modelo_ia: "determinista", base_posiciones: 1 };
+const emptyResult = { tokens: [], ast: null, ast_text: "", simbolos: [], tipos: [], errores: [], resultado: null, codigo_maquina: [], pasos_resolucion: [], explicacion_ia: "", explicacion_semantica: "", explicacion_codigo_maquina: "", explicacion_error: "", ia_error: "", modelo_ia: "pendiente", base_posiciones: 1 };
 
-const menuIcons = {
-  Simulador: "▦",
-  Tokens: "⌘",
-  AST: "⌁",
-  Tablas: "▤",
-  Errores: "⚠",
-  Teoría: "◈",
-};
+// Reloj del navegador. Se envía a Gemini para que el saludo coincida con
+// la hora de quien usa el simulador, no con un texto fijo.
+function clientClock() {
+  const now = new Date();
+  const hour = now.getHours();
+  const saludo = hour < 12 ? "Buenos días" : hour < 19 ? "Buenas tardes" : "Buenas noches";
+  const momento = hour < 12 ? "mañana" : hour < 19 ? "tarde" : "noche";
+  const fecha = now.toLocaleString("es-CO", {
+    weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+  return {
+    label: `${saludo} · ${now.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}`,
+    hora_cliente: `${saludo}. Hoy es ${fecha}. Franja del día: ${momento}.`,
+  };
+}
+
+// Evita que un < o & escrito por Gemini rompa el HTML del reporte.
+function asHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\n/g, "<br>");
+}
 
 function countNodes(node) {
   return node ? 1 + countNodes(node.left) + countNodes(node.right) : 0;
@@ -243,29 +260,13 @@ function createReport(result, source) {
     return { lines, circles };
   }
   const reportTree = result.ast ? reportAstSvg(result.ast, 300, 35, 155) : { lines: [], circles: [] };
-  const summary = result.ast
-    ? `La expresión ${source} se tokenizó correctamente. El parser aplicó precedencia: primero * y /, después + y -, y agrupó operaciones del mismo nivel de izquierda a derecha. El AST tiene ${countNodes(result.ast)} nodos. Finalmente, la máquina de pila ejecutó ${result.codigo_maquina.length} instrucciones y obtuvo ${result.resultado}.`
-    : "No se pudo construir el AST porque la entrada contiene errores.";
+  const summary = asHtml(result.explicacion_ia) || "Gemini todavía no ha explicado esta fórmula.";
   const resolution = (result.pasos_resolucion || []).map((step, index) => `<p><b>${index + 1}. ${step.priority === "prioritaria" ? "Operación prioritaria" : "Operación de izquierda a derecha"}:</b> ${step.calculation}<br>La expresión queda: <code>${step.expression}</code></p>`).join("");
-  const semanticExplanation = result.ast
-    ? `Se recorrió el AST para identificar cada número literal. Los valores únicos encontrados fueron ${result.simbolos.map((item) => item.symbol).join(", ") || "ninguno"}.
-<br>Cada número aparece una sola vez en la tabla semántica y recibe una dirección simulada de memoria. Esto evita registros duplicados y permite identificar cada símbolo de forma única.`
-    : "No se pudo construir la tabla semántica porque la expresión contiene errores.";
-  const machineSteps = (result.codigo_maquina || []).map((instruction, index) => {
-    const number = instruction.startsWith("PUSH ") ? instruction.slice(5) : "";
-    const explanation = instruction === "ADD"
-      ? "Retira los dos últimos valores de la pila y coloca su suma."
-      : instruction === "SUB"
-        ? "Retira los dos últimos valores y coloca el resultado de la resta."
-        : instruction === "MUL"
-          ? "Retira los dos últimos valores y coloca su producto."
-          : instruction === "DIV"
-            ? "Retira los dos últimos valores y coloca el cociente."
-            : instruction === "STORE R0"
-              ? "Guarda el resultado final de la pila en el registro R0."
-              : `Carga el número ${number} en la pila como operando.`;
-    return `<tr><td>${String(index + 1).padStart(2, "0")}</td><td><code>${instruction}</code></td><td>${explanation}</td></tr>`;
-  }).join("");
+  const semanticExplanation = asHtml(result.explicacion_semantica) || "Gemini todavía no ha explicado la tabla semántica.";
+  const machineExplanation = asHtml(result.explicacion_codigo_maquina) || "Gemini todavía no ha explicado el código máquina.";
+  const machineSteps = (result.codigo_maquina || []).map((instruction, index) => (
+    `<tr><td>${String(index + 1).padStart(2, "0")}</td><td><code>${instruction}</code></td></tr>`
+  )).join("");
   const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Reporte ArithLab+</title>
     <style>
       *{box-sizing:border-box}@page{size:A4;margin:14mm}body{font-family:Arial,sans-serif;color:#202124;margin:0;background:white}main{padding:28px 38px}.brand{border-bottom:2px solid #d8ba78;padding-bottom:14px;margin-bottom:22px}h1{color:#604c2d;margin:0 0 5px;font-family:Georgia,serif}h2{color:#604c2d;border-bottom:1px solid #dfd3b8;padding-bottom:7px;margin:24px 0 12px;font-size:18px}.formula{font:18px monospace;background:#f8f2e7;border-left:4px solid #c6a665;padding:15px;border-radius:7px}.step-badge{display:inline-block;background:#604c2d;color:white;border-radius:20px;padding:5px 9px;font-size:11px;margin-right:8px}p,td,th{font-size:12px;line-height:1.6}table{border-collapse:collapse;width:100%;margin-bottom:16px}th{background:#604c2d;color:white}td,th{padding:9px;border:1px solid #ddd;text-align:left}.note{background:#f4f7ff;border:1px solid #bbc7df;border-radius:8px;padding:13px}.error{color:#a7353c;background:#fff0f0;border:1px solid #e6a4a8;padding:14px;border-radius:8px}.report-ast{width:100%;height:430px;background:#171718;border-radius:12px;border:1px solid #ddd}.report-ast line{stroke:#777;stroke-width:1.5}.report-ast circle{fill:#202022;stroke-width:2}.report-ast .num{stroke:#c79b42}.report-ast .op{stroke:#806bb0}.report-ast text{fill:white;font:14px monospace}.ast-text{background:#202124;color:#f4dfb0;border-radius:8px;padding:14px;white-space:pre-wrap;font:12px monospace}.resolution p{margin:7px 0}.result-box{background:#edf8f1;border:2px solid #6da785;border-radius:10px;padding:18px}.result-box strong{display:block;color:#28724a;font:700 34px monospace;margin-top:5px}@media print{main{padding:20px}.report-ast{break-inside:avoid}}
@@ -295,8 +296,8 @@ function createReport(result, source) {
       <table><thead><tr><th>Símbolo</th><th>Tipo</th></tr></thead><tbody>${types || '<tr><td colspan="2">Sin tipos disponibles</td></tr>'}</tbody></table>
 
       <h2><span class="step-badge">07</span>Código máquina y explicación</h2>
-      <p class="note">Las instrucciones se generan mediante recorrido postorden: primero se visitan los hijos izquierdo y derecho del nodo y al final se genera la operación del operador.</p>
-      <table><thead><tr><th>N.º</th><th>Instrucción</th><th>Explicación</th></tr></thead><tbody>${machineSteps || '<tr><td colspan="3">No se generó código máquina</td></tr>'}</tbody></table>
+      <p class="note">${machineExplanation}</p>
+      <table><thead><tr><th>N.º</th><th>Instrucción</th></tr></thead><tbody>${machineSteps || '<tr><td colspan="2">No se generó código máquina</td></tr>'}</tbody></table>
 
       <h2><span class="step-badge">08</span>Resultado final</h2>
       <div class="result-box">Resultado obtenido<strong>${result.resultado ?? "No disponible"}</strong></div>
@@ -309,14 +310,14 @@ function downloadSectionReport(section, result, source) {
   const content = {
     Entrada: `<h2>Entrada</h2><p class="formula">${source || "(entrada vacía)"}</p>`,
     Tokens: `<h2>Tokens identificados</h2><table><tr><th>N.º</th><th>Tipo</th><th>Valor</th></tr>${result.tokens.map((token, index) => `<tr><td>${index + 1}</td><td>${token.type}</td><td>${token.value}</td></tr>`).join("")}</table>`,
-    AST: `<h2>Árbol de Sintaxis Abstracta</h2><pre>${result.ast_text || "No generado"}</pre><p>El AST respeta la precedencia de * y / sobre + y -, y la asociatividad izquierda.</p>`,
-    Semántica: `<h2>Tabla semántica</h2><table><tr><th>Símbolo</th><th>Dirección</th></tr>${result.simbolos.map((item) => `<tr><td>${item.symbol}</td><td>${item.address}</td></tr>`).join("")}</table><p>Los números únicos reciben una dirección simulada en orden de aparición.</p>`,
-    Construcción: `<h2>Construcción paso a paso</h2>${(result.pasos_resolucion || []).map((stepItem, index) => `<p><b>${index + 1}.</b> ${stepItem.calculation}<br>Expresión: <code>${stepItem.expression}</code></p>`).join("")}`,
-    Tipos: `<h2>Tabla de tipos</h2><table><tr><th>Símbolo</th><th>Tipo</th></tr>${result.tipos.map((item) => `<tr><td>${item.symbol}</td><td>${item.type}</td></tr>`).join("")}</table>`,
-    "Código máquina": `<h2>Código máquina</h2><table><tr><th>N.º</th><th>Instrucción</th></tr>${(result.codigo_maquina || []).map((instruction, index) => `<tr><td>${index + 1}</td><td><code>${instruction}</code></td></tr>`).join("")}</table>`,
+    AST: `<h2>Árbol de Sintaxis Abstracta</h2><pre>${result.ast_text || "No generado"}</pre><p>${asHtml(result.explicacion_ia) || "Compila para que Gemini explique el árbol y la fórmula."}</p>`,
+    Semántica: `<h2>Tabla semántica</h2><table><tr><th>Símbolo</th><th>Dirección</th></tr>${result.simbolos.map((item) => `<tr><td>${item.symbol}</td><td>${item.address}</td></tr>`).join("")}</table><p>${asHtml(result.explicacion_semantica) || "Compila para que Gemini explique cada símbolo."}</p>`,
+    Construcción: `<h2>Construcción paso a paso</h2>${(result.pasos_resolucion || []).map((stepItem, index) => `<p><b>${index + 1}.</b> ${stepItem.calculation}<br>Expresión: <code>${stepItem.expression}</code></p>`).join("")}<p>${asHtml(result.explicacion_ia)}</p>`,
+    Tipos: `<h2>Tabla de tipos</h2><table><tr><th>Símbolo</th><th>Tipo</th></tr>${result.tipos.map((item) => `<tr><td>${item.symbol}</td><td>${item.type}</td></tr>`).join("")}</table><p>${asHtml(result.explicacion_semantica)}</p>`,
+    "Código máquina": `<h2>Código máquina</h2><table><tr><th>N.º</th><th>Instrucción</th></tr>${(result.codigo_maquina || []).map((instruction, index) => `<tr><td>${index + 1}</td><td><code>${instruction}</code></td></tr>`).join("")}</table><p>${asHtml(result.explicacion_codigo_maquina) || "Compila para que Gemini explique cada instrucción."}</p>`,
     Resultado: `<h2>Resultado final</h2><p><strong>${result.resultado ?? "No disponible"}</strong></p>`,
     Tablas: `<h2>Tabla de símbolos</h2><table><tr><th>Símbolo</th><th>Dirección</th></tr>${result.simbolos.map((item) => `<tr><td>${item.symbol}</td><td>${item.address}</td></tr>`).join("")}</table><h2>Tabla de tipos</h2><table><tr><th>Símbolo</th><th>Tipo</th></tr>${result.tipos.map((item) => `<tr><td>${item.symbol}</td><td>${item.type}</td></tr>`).join("")}</table>`,
-    Errores: `<h2>Errores detectados</h2>${result.errores.length ? result.errores.map((error) => `<p class="error">${error}</p>`).join("") : "<p>No hay errores. La expresión es válida.</p>"}`,
+    Errores: `<h2>Errores detectados</h2>${result.errores.length ? result.errores.map((error) => `<p class="error">${error}</p>`).join("") : "<p>No hay errores. La expresión es válida.</p>"}<p>${asHtml(result.explicacion_error)}</p>`,
     Teoría: `<h2>Fases del compilador</h2><ol><li>Léxico: convierte caracteres en tokens.</li><li>Sintáctico: construye el AST aplicando precedencia.</li><li>Semántico: crea símbolos y tipos.</li><li>Generación: produce código máquina de pila.</li></ol>`,
   }[section] || "";
   const reportWindow = window.open("", "_blank");
@@ -339,30 +340,25 @@ export default function App() {
   const [section, setSection] = useState("Simulador");
   const [typedProcess, setTypedProcess] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [clockLabel, setClockLabel] = useState(clientClock().label);
+  const explainRequest = useRef(0);
+  const explainAbort = useRef(null);
 
-  const processText = result.ast
-    ? (result.explicacion_ia || `El resultado final de la operación es ${result.resultado}.\n\nResolución paso a paso\nSiguiendo la jerarquía de las operaciones, primero resolvemos * y / y luego las sumas y restas de izquierda a derecha:\n\n${result.pasos_resolucion.map((stepItem, index) => `${index + 1}. ${stepItem.priority === "prioritaria" ? "Operación prioritaria" : "Operación de izquierda a derecha"}:\n${stepItem.calculation}\nLa expresión queda: ${stepItem.expression}`).join("\n\n")}\n\nEl AST representa este mismo orden: los operadores son nodos internos y los números son hojas. La máquina de pila traduce cada reducción a instrucciones y guarda el resultado final en R0.`)
-    : "";
-  const semanticExplanation = result.ast
-    ? (result.explicacion_semantica || `Se recorrió el AST para identificar cada número literal. Los valores únicos encontrados fueron ${result.simbolos.map((item) => item.symbol).join(", ") || "ninguno"}.\n\nCada número aparece una sola vez en la tabla semántica. Su dirección simulada representa el lugar que ocuparía en memoria: ${result.simbolos.map((item) => `${item.symbol} → ${item.address}`).join(", ") || "sin símbolos"}.\n\nEsto permite reutilizar el mismo símbolo si el número vuelve a aparecer y evita crear registros duplicados.`)
-    : "";
-  const machineExplanation = result.codigo_maquina?.length
-    ? (result.explicacion_codigo_maquina || `El AST se convierte a código máquina mediante recorrido postorden: primero se visita el hijo izquierdo, luego el hijo derecho y al final el operador.\n\n${result.codigo_maquina.map((instruction, index) => {
-      const number = instruction.startsWith("PUSH ") ? instruction.slice(5) : "";
-      const explanation = instruction === "ADD"
-        ? "Retira los dos últimos valores de la pila y coloca su suma."
-        : instruction === "SUB"
-          ? "Retira los dos últimos valores y coloca el resultado de la resta."
-          : instruction === "MUL"
-            ? "Retira los dos últimos valores y coloca su producto."
-            : instruction === "DIV"
-              ? "Retira los dos últimos valores y coloca el cociente."
-              : instruction === "STORE R0"
-                ? "Guarda el resultado final de la pila en el registro R0."
-                : `Carga el número ${number} en la pila como operando.`;
-      return `${index + 1}. ${instruction}: ${explanation}`;
-    }).join("\n\n")}\n\nPor esta razón, la pila representa los operandos temporalmente y cada instrucción reduce dos valores hasta obtener un resultado final.`)
-    : "";
+  // Solo se muestra texto si modelo_ia empieza por "gemini".
+  // Si se vuelve a poner un párrafo local en estos tres valores, la pantalla
+  // deja de esperar la respuesta de la IA y vuelve a enseñar un texto fijo.
+  const geminiListo = String(result.modelo_ia || "").startsWith("gemini");
+  const processText = geminiListo ? result.explicacion_ia : "";
+  const semanticExplanation = geminiListo ? result.explicacion_semantica : "";
+  const machineExplanation = geminiListo ? result.explicacion_codigo_maquina : "";
+  const aiWait = `Gemini está redactando la fórmula ${source || ""} paso a paso. ${clockLabel}.`;
+
+  useEffect(() => {
+    const tick = () => setClockLabel(clientClock().label);
+    tick();
+    const clockTimer = window.setInterval(tick, 30000);
+    return () => window.clearInterval(clockTimer);
+  }, []);
 
   useEffect(() => {
     setTypedProcess("");
@@ -377,79 +373,87 @@ export default function App() {
   }, [processText]);
 
   async function compile() {
+    // 1) /compilar trae tokens, árbol, tablas y resultado, sin párrafos.
+    // 2) /explicar pide a Gemini el texto de esa fórmula y de esta hora.
+    // Si se quita el segundo fetch, las tarjetas se quedan en el mensaje de espera.
+    const requestId = explainRequest.current + 1;
+    explainRequest.current = requestId;
+    explainAbort.current?.abort();
     setLoading(true);
+    setAiLoading(false);
+    const horaCliente = clientClock().hora_cliente;
     try {
-      const response = await fetch(`${API_URL}/compilar`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source, zero_based: zeroBased }) });
+      const response = await fetch(`${API_URL}/compilar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source, zero_based: zeroBased, hora_cliente: horaCliente }),
+      });
       if (!response.ok) {
         const detail = await response.text();
         throw new Error(`HTTP ${response.status}${detail ? `: ${detail.slice(0, 120)}` : ""}`);
       }
       const compiled = await response.json();
-      setResult(compiled);
-      if (compiled.errores.length) {
-        const localError = compiled.errores
-          .map((error) => error.replace(/^Error léxico:\s*/i, ""))
-          .join(" ");
-        setResult((current) => ({
-          ...current,
-          explicacion_error: `Posición ${compiled.base_posiciones}: ${localError} Sustituye cada carácter inválido por +, -, * o /, o elimina el carácter.`,
-        }));
-      }
-      if (compiled.ast || compiled.errores.length) {
-        setAiLoading(true);
-        const controller = new AbortController();
-        const timeout = window.setTimeout(() => controller.abort(), 5000);
-        const endpoint = compiled.errores.length ? "/explicar-error" : "/explicar";
-        fetch(`${API_URL}${endpoint}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ source, zero_based: zeroBased }),
-          signal: controller.signal,
-        })
-          .then((aiResponse) => aiResponse.ok ? aiResponse.json() : null)
-          .then((improved) => {
-            if (!improved) return;
-            setResult((current) => ({
-              ...current,
-              explicacion_ia: improved.explicacion_ia || current.explicacion_ia,
-              explicacion_semantica: improved.explicacion_semantica || current.explicacion_semantica,
-              explicacion_codigo_maquina: improved.explicacion_codigo_maquina || current.explicacion_codigo_maquina,
-              explicacion_error: improved.explicacion_error || current.explicacion_error,
-              modelo_ia: improved.modelo_ia || current.modelo_ia,
-            }));
-          })
-          .catch(() => undefined)
-          .finally(() => {
-            window.clearTimeout(timeout);
-            setAiLoading(false);
-          });
-      }
+      if (explainRequest.current !== requestId) return;
+      setResult({
+        ...compiled,
+        explicacion_ia: "",
+        explicacion_semantica: "",
+        explicacion_codigo_maquina: "",
+        explicacion_error: "",
+        ia_error: "",
+        modelo_ia: "pendiente",
+      });
+      if (!compiled.ast && !compiled.errores.length) return;
+      setAiLoading(true);
       const endpoint = compiled.errores.length ? "/explicar-error" : "/explicar";
       const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 5000);
-      fetch(`${API_URL}${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source, zero_based: zeroBased }),
-        signal: controller.signal,
-      })
-        .then((explanationResponse) => explanationResponse.ok ? explanationResponse.json() : null)
-        .then((improved) => {
-          if (!improved) return;
+      explainAbort.current = controller;
+      const timeout = window.setTimeout(() => controller.abort(), 30000);
+      try {
+        const aiResponse = await fetch(`${API_URL}${endpoint}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ source, zero_based: zeroBased, hora_cliente: horaCliente }),
+          signal: controller.signal,
+        });
+        const improved = aiResponse.ok ? await aiResponse.json() : null;
+        if (explainRequest.current !== requestId) return;
+        const modelName = improved?.modelo_ia || "";
+        if (improved && modelName.startsWith("gemini")) {
           setResult((current) => ({
             ...current,
-            explicacion_ia: improved.explicacion_ia || current.explicacion_ia,
-            explicacion_semantica: improved.explicacion_semantica || current.explicacion_semantica,
-            explicacion_codigo_maquina: improved.explicacion_codigo_maquina || current.explicacion_codigo_maquina,
-            explicacion_error: improved.explicacion_error || current.explicacion_error,
-            modelo_ia: improved.modelo_ia || current.modelo_ia,
+            explicacion_ia: improved.explicacion_ia || "",
+            explicacion_semantica: improved.explicacion_semantica || "",
+            explicacion_codigo_maquina: improved.explicacion_codigo_maquina || "",
+            explicacion_error: improved.explicacion_error || "",
+            ia_error: "",
+            modelo_ia: modelName,
           }));
-        })
-        .catch(() => undefined)
-        .finally(() => window.clearTimeout(timeout));
+        } else {
+          setResult((current) => ({
+            ...current,
+            modelo_ia: "error",
+            ia_error: improved?.ia_error || "Gemini no respondió. Vuelve a compilar la fórmula.",
+          }));
+        }
+      } catch {
+        if (explainRequest.current !== requestId) return;
+        setResult((current) => ({
+          ...current,
+          modelo_ia: "error",
+          ia_error: "Gemini tardó demasiado o no hubo conexión. Vuelve a compilar.",
+        }));
+      } finally {
+        window.clearTimeout(timeout);
+        if (explainRequest.current === requestId) setAiLoading(false);
+      }
     } catch (error) {
-      setResult({ ...emptyResult, errores: [`Backend no disponible. Ejecuta: python -m uvicorn backend.main:app --reload --port 8000 (${error.message})`] });
-    } finally { setLoading(false); }
+      if (explainRequest.current === requestId) {
+        setResult({ ...emptyResult, errores: [`Backend no disponible. Ejecuta: python -m uvicorn backend.main:app --reload --port 8000 (${error.message})`] });
+      }
+    } finally {
+      if (explainRequest.current === requestId) setLoading(false);
+    }
   }
 
   const metrics = useMemo(() => ({
@@ -493,7 +497,7 @@ export default function App() {
       <div className="brand"><div className="brand-mark"><BrandIcon /></div><div><h1>ArithLab<span>+</span></h1><p>Tokeniza. Parsea.<br />Entiende.</p></div></div>
       <nav>{stepMenu.map(([item, targetId, icon], index) => <button key={item} className={step === index ? "nav-item active" : "nav-item"} onClick={() => openStep(item, targetId)}><span className="nav-icon nav-step-icon" aria-hidden="true">{icon}</span><span className="nav-step-number">{String(index + 1).padStart(2, "0")}</span><span>{item}</span></button>)}</nav>
       <div className="sidebar-tools"><button className={section === "Errores" ? "nav-item active" : "nav-item"} onClick={() => setSection("Errores")}><span className="nav-icon" aria-hidden="true">⚠</span><span>Errores</span></button><button className={section === "Teoría" ? "nav-item active" : "nav-item"} onClick={() => setSection("Teoría")}><span className="nav-icon" aria-hidden="true">◈</span><span>Teoría</span></button></div>
-      <div className="sidebar-foot"><span className="status-dot" /> API Python conectable<br /><small>{aiLoading ? "✦ Consultando Gemini..." : `IA: ${result.modelo_ia || "determinista"}`}</small></div>
+      <div className="sidebar-foot"><span className="status-dot" /> API Python conectable<br /><small>{aiLoading ? `✦ Consultando Gemini · ${clockLabel}` : `IA: ${result.modelo_ia || "pendiente"} · ${clockLabel}`}</small></div>
     </aside>
     <main className="main-content">
       <header className="topbar"><div><p className="eyebrow">LABORATORIO / {section.toUpperCase()}</p><h2><AnimatedTitle>Simulador de compilador aritmético</AnimatedTitle></h2></div><button className="download-button" onClick={() => createReport(result, source)}>↓ Descargar reporte</button></header>
@@ -501,26 +505,9 @@ export default function App() {
       <section className="pipeline panel"><div className="pipeline-line">{pipeline.map((item, index) => <button key={item} className={index <= step ? "pipeline-stage reached" : "pipeline-stage"} onClick={() => moveStep(index)}><span>{String(index + 1).padStart(2, "0")}</span><b>{item}</b>{index < pipeline.length - 1 && <i />}</button>)}</div><div className="step-controls"><span>Modo paso a paso</span><button onClick={() => moveStep(step - 1)}>←</button><button onClick={() => moveStep(step + 1)}>→</button></div></section>
       {section !== "Simulador" && <section className="section-view panel">
         <div className="section-view-header"><div><span className="kicker">VISTA / {section.toUpperCase()}</span><h3>{section === "Teoría" ? "Guía de teoría de compiladores" : `Resultados de ${section}`}</h3></div><SectionDownload section={section} result={result} source={source} /></div>
-        {section === "Entrada" && <div className="step-view entry-step-view">
-          <p className="view-description">Escribe una expresión aritmética con números enteros y los operadores +, -, * o /.</p>
-          <textarea className="step-entry" value={source} onChange={(event) => setSource(event.target.value)} aria-label="Expresión aritmética" placeholder="Ej. 10 + 25 * 10 - 4" />
-          <div className="quick-examples">{examples.map(([label, value]) => <button key={label} onClick={() => setSource(value)}>{label}: {value}</button>)}</div>
-          <div className="input-actions"><button className="compile-button" onClick={compile} disabled={loading}>{loading ? "Compilando..." : "Compilar expresión  →"}</button><label className="switch-label"><input type="checkbox" checked={zeroBased} onChange={(e) => setZeroBased(e.target.checked)} /><span className="switch" /> Posiciones desde {zeroBased ? "0" : "1"}</label></div>
-          {hasErrors && <div className="error-box">{result.errores.map((error) => <p key={error}>{error}</p>)}
-            {result.explicacion_error && <p className="error-ai"><b>Explicación IA:</b> {result.explicacion_error}</p>}
-          </div>}
-        </div>}
-        {section === "Tokens" && <><p className="view-description">Cada token representa una unidad reconocida por el analizador léxico.</p><Table title="Tokens identificados" headers={["N.º", "Tipo", "Valor", "Posición"]} rows={result.tokens.map((token, index) => [index + 1, token.type, token.value, token.position])} /></>}
-        {section === "AST" && <><p className="view-description">Arrastra las bolitas para ordenar el árbol. Los operadores lilas son nodos internos y los números crema son hojas.</p><div className="ast-stage large-ast">{result.ast ? <AstSvg node={result.ast} activeToken={activeToken} /> : <div className="empty-ast"><p>Compila una expresión para visualizar el AST.</p></div>}</div><pre className="ast-text">{result.ast_text || "No hay AST generado."}</pre></>}
-        {section === "Semántica" && <div className="semantic-grid"><Table title="Tabla semántica" headers={["Símbolo", "Dirección"]} rows={result.simbolos.map((item) => [item.symbol, <code>{item.address}</code>])} /><div className="panel semantic-explanation"><div className="panel-heading"><div><span className="kicker">ANÁLISIS SEMÁNTICO</span><h3>Cómo se construyó la tabla</h3></div><span className="ai-badge">✦ SEMÁNTICA</span></div><div className="formula-banner"><span>FÓRMULA</span><code>{source || "—"}</code></div><pre className="semantic-process">{semanticExplanation || "Compila una expresión para explicar los símbolos únicos."}</pre></div></div>}
-        {section === "Construcción" && <><p className="view-description">El proceso reduce primero multiplicaciones y divisiones, y después suma y resta de izquierda a derecha.</p><div className="formula-banner"><span>FÓRMULA</span><code>{source || "—"}</code></div><pre className="typed-process">{typedProcess || "Compila una expresión para ver la construcción paso a paso."}</pre></>}
-        {section === "Tipos" && <><p className="view-description">La tabla de tipos clasifica cada símbolo único identificado por el análisis semántico.</p><Table title="Tabla de tipos" headers={["Símbolo", "Tipo"]} rows={result.tipos.map((item) => [item.symbol, <span className="type-pill">{item.type}</span>])} /></>}
-        {section === "Código máquina" && <><p className="view-description">La traducción usa una máquina de pila y recorrido postorden sobre el AST.</p><div className="machine-grid"><div className="panel machine-panel"><div className="panel-heading"><div><span className="kicker">CÓDIGO MÁQUINA</span><h3>Instrucciones</h3></div><span className="machine-badge">STACK VM</span></div><div className="machine-code">{result.codigo_maquina?.length ? result.codigo_maquina.map((instruction, index) => <div className="machine-line" key={`${instruction}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><code>{instruction}</code><i>{instruction.startsWith("PUSH") ? "cargar" : instruction === "STORE R0" ? "guardar" : "operar"}</i></div>) : <span className="muted">Las instrucciones aparecerán después de compilar.</span>}</div></div><div className="panel machine-explanation"><div className="panel-heading"><div><span className="kicker">CONSTRUCCIÓN GUIADA</span><h3>Cómo se arma</h3></div><span className="ai-badge">✦ POSTORDEN</span></div><pre className="machine-process">{machineExplanation || "Compila una expresión para explicar el código máquina."}</pre></div></div></>}
-        {section === "Resultado" && <div className="result-card step-result"><span className="kicker">08 / RESULTADO FINAL</span><h3>Valor obtenido</h3><strong>{result.resultado ?? "—"}</strong><p>{result.resultado !== null ? "El AST fue evaluado correctamente." : "Compila una expresión válida para obtener el resultado."}</p></div>}
-        {section === "Tablas" && <div className="tables-grid section-tables"><Table title="Tabla de símbolos" headers={["Símbolo", "Dirección"]} rows={result.simbolos.map((item) => [item.symbol, <code>{item.address}</code>])} /><Table title="Tabla de tipos" headers={["Símbolo", "Tipo"]} rows={result.tipos.map((item) => [item.symbol, <span className="type-pill">{item.type}</span>])} /></div>}
         {section === "Errores" && <div className="error-view">{result.errores.length ? <>
           {result.errores.map((error) => <div className="error-box" key={error}>{error}</div>)}
-          <div className="panel ai-error-explanation"><div className="panel-heading"><div><span className="kicker">ANÁLISIS IA DEL ERROR</span><h3>Por qué ocurrió el error</h3></div><span className="ai-badge">{aiLoading ? "✦ CONSULTANDO GEMINI" : "✦ GEMINI"}</span></div><pre className="semantic-process">{result.explicacion_error || "Consultando una explicación del error..."}</pre></div>
+          <div className="panel ai-error-explanation"><div className="panel-heading"><div><span className="kicker">ANÁLISIS IA DEL ERROR</span><h3>Por qué ocurrió el error</h3></div><span className="ai-badge">{aiLoading ? "✦ CONSULTANDO GEMINI" : geminiListo ? `✦ ${result.modelo_ia}` : "✦ GEMINI"}</span></div><pre className="semantic-process">{aiLoading ? aiWait : (result.explicacion_error || result.ia_error || "Compila una fórmula con error para que Gemini la explique.")}</pre></div>
         </> : <div className="success-box">No hay errores. La expresión es válida.</div>}</div>}
         {section === "Teoría" && <div className="theory-view"><article><h4>1. Análisis léxico</h4><p>Lee la fórmula, ignora espacios y reconoce números y operadores válidos. Los caracteres desconocidos se reportan con su posición.</p></article><article><h4>2. Análisis sintáctico</h4><p>El parser de descenso recursivo aplica precedencia: primero multiplicación/división y luego suma/resta. Las operaciones iguales se agrupan de izquierda a derecha.</p></article><article><h4>3. Semántica y código máquina</h4><p>Los números únicos reciben direcciones simuladas y el AST se traduce a instrucciones PUSH, ADD, SUB, MUL, DIV y STORE R0.</p></article></div>}
       </section>}
@@ -530,7 +517,7 @@ export default function App() {
           <div className="quick-examples"><span>Ejemplos rápidos</span>{examples.map(([label, value]) => <button key={label} onClick={() => setSource(value)}>{label}</button>)}</div>
           <div className="input-actions"><button className="compile-button" onClick={compile} disabled={loading}>{loading ? "Compilando..." : "Compilar expresión  →"}</button><label className="switch-label"><input type="checkbox" checked={zeroBased} onChange={(e) => setZeroBased(e.target.checked)} /><span className="switch" /> Posiciones desde {zeroBased ? "0" : "1"}</label></div>
           {hasErrors && <div className="error-box"><strong>! Se encontraron {result.errores.length} error{result.errores.length > 1 ? "es" : ""}</strong>{result.errores.map((error) => <p key={error}>{error}</p>)}
-            {result.explicacion_error && <p className="error-ai"><b>Explicación IA:</b> {result.explicacion_error}</p>}
+            <p className="error-ai"><b>Explicación IA:</b> {aiLoading ? aiWait : (result.explicacion_error || result.ia_error || "Gemini todavía no explica este error.")}</p>
           </div>}
       </section>
       <section id="tokens-step" className="section-block"><div className="section-title"><span className="kicker">02 / LÉXICO</span><h3>Tokens identificados</h3></div><div className="token-list">{result.tokens.length ? result.tokens.map((token, index) => <button className={`token-chip ${token.type === "NÚMERO" ? "number-chip" : "operator-chip"}`} key={`${token.position}-${index}`} onMouseEnter={() => setActiveToken(token.value)} onMouseLeave={() => setActiveToken(null)}><small>{String(index + 1).padStart(2, "0")}</small>{token.value}<em>{token.type}</em></button>) : <span className="muted">Los tokens aparecerán después de compilar.</span>}</div></section>
@@ -540,22 +527,22 @@ export default function App() {
       </section>
       <section id="semantic-step" className="semantic-grid">
         <Table title="04 / Tabla semántica" headers={["Símbolo", "Dirección"]} rows={result.simbolos.map((item) => [item.symbol, <code>{item.address}</code>])} />
-        <div className="panel semantic-explanation"><div className="panel-heading"><div><span className="kicker">04 / ANÁLISIS SEMÁNTICO</span><h3>Cómo se construyó la tabla</h3></div><span className="ai-badge">✦ SEMÁNTICA</span></div>
+        <div className="panel semantic-explanation"><div className="panel-heading"><div><span className="kicker">04 / ANÁLISIS SEMÁNTICO</span><h3>Cómo se construyó la tabla</h3></div><span className="ai-badge">{aiLoading ? "✦ CONSULTANDO GEMINI" : geminiListo ? `✦ ${result.modelo_ia}` : "✦ GEMINI"}</span></div>
           <div className="formula-banner"><span>FÓRMULA</span><code>{source || "—"}</code></div>
-          <pre className="semantic-process">{semanticExplanation || "Compila una expresión para explicar cómo se crean los símbolos únicos y sus direcciones."}</pre>
+          <pre className="semantic-process">{aiLoading ? aiWait : (semanticExplanation || result.ia_error || "Compila una expresión para que Gemini explique cada símbolo, su dirección y su tipo.")}</pre>
         </div>
       </section>
-      <section id="construction-step" className="panel process-panel"><div className="panel-heading"><div><span className="kicker">05 / EJECUCIÓN GUIADA</span><h3>Cómo se construye el AST</h3></div><span className="ai-badge">✦ EXPLICACIÓN IA</span></div>
+      <section id="construction-step" className="panel process-panel"><div className="panel-heading"><div><span className="kicker">05 / EJECUCIÓN GUIADA</span><h3>Cómo se construye el AST</h3></div><span className="ai-badge">{aiLoading ? "✦ CONSULTANDO GEMINI" : geminiListo ? `✦ ${result.modelo_ia}` : "✦ GEMINI"}</span></div>
           <div className="formula-banner"><span>FÓRMULA</span><code>{source || "—"}</code></div>
-          <pre className="typed-process">{typedProcess || "Compila una expresión y te explicaré el proceso paso a paso..."}</pre>
+          <pre className="typed-process">{aiLoading ? aiWait : (typedProcess || result.ia_error || "Compila una expresión para que Gemini explique la fórmula paso a paso.")}</pre>
       </section>
       <section id="types-step" className="types-grid"><Table title="06 / Tabla de tipos" headers={["Símbolo", "Tipo"]} rows={result.tipos.map((item) => [item.symbol, <span className="type-pill">{item.type}</span>])} /></section>
       <section id="machine-step" className="machine-grid">
         <div className="panel machine-panel"><div className="panel-heading"><div><span className="kicker">07 / GENERACIÓN</span><h3>Código máquina</h3></div><span className="machine-badge">STACK VM</span></div>
           <div className="machine-code">{result.codigo_maquina?.length ? result.codigo_maquina.map((instruction, index) => <div className="machine-line" key={`${instruction}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><code>{instruction}</code><i>{instruction.startsWith("PUSH") ? "cargar" : instruction === "STORE R0" ? "guardar" : "operar"}</i></div>) : <span className="muted">Las instrucciones aparecerán después de compilar.</span>}</div>
         </div>
-        <div className="panel machine-explanation"><div className="panel-heading"><div><span className="kicker">07 / CONSTRUCCIÓN GUIADA</span><h3>Cómo se arma el código máquina</h3></div><span className="ai-badge">✦ RECORRIDO POSTORDEN</span></div>
-          <pre className="machine-process">{machineExplanation || "Compila una expresión para explicar el recorrido del AST y la construcción de cada instrucción."}</pre>
+        <div className="panel machine-explanation"><div className="panel-heading"><div><span className="kicker">07 / CONSTRUCCIÓN GUIADA</span><h3>Cómo se arma el código máquina</h3></div><span className="ai-badge">{aiLoading ? "✦ CONSULTANDO GEMINI" : geminiListo ? `✦ ${result.modelo_ia}` : "✦ GEMINI"}</span></div>
+          <pre className="machine-process">{aiLoading ? aiWait : (machineExplanation || result.ia_error || "Compila una expresión para que Gemini explique cada instrucción de la pila.")}</pre>
         </div>
       </section>
       <section id="result-step" className="result-card"><span className="kicker">08 / RESULTADO</span><h3>Resultado final</h3><strong>{result.resultado ?? "—"}</strong><p>{result.resultado !== null ? "AST evaluado correctamente" : "Sin resultado disponible"}</p></section>
