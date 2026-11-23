@@ -338,6 +338,7 @@ export default function App() {
   const [zeroBased, setZeroBased] = useState(false);
   const [section, setSection] = useState("Simulador");
   const [typedProcess, setTypedProcess] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
 
   const processText = result.ast
     ? (result.explicacion_ia || `El resultado final de la operación es ${result.resultado}.\n\nResolución paso a paso\nSiguiendo la jerarquía de las operaciones, primero resolvemos * y / y luego las sumas y restas de izquierda a derecha:\n\n${result.pasos_resolucion.map((stepItem, index) => `${index + 1}. ${stepItem.priority === "prioritaria" ? "Operación prioritaria" : "Operación de izquierda a derecha"}:\n${stepItem.calculation}\nLa expresión queda: ${stepItem.expression}`).join("\n\n")}\n\nEl AST representa este mismo orden: los operadores son nodos internos y los números son hojas. La máquina de pila traduce cada reducción a instrucciones y guarda el resultado final en R0.`)
@@ -385,6 +386,44 @@ export default function App() {
       }
       const compiled = await response.json();
       setResult(compiled);
+      if (compiled.errores.length) {
+        const localError = compiled.errores
+          .map((error) => error.replace(/^Error léxico:\s*/i, ""))
+          .join(" ");
+        setResult((current) => ({
+          ...current,
+          explicacion_error: `Posición ${compiled.base_posiciones}: ${localError} Sustituye cada carácter inválido por +, -, * o /, o elimina el carácter.`,
+        }));
+      }
+      if (compiled.ast || compiled.errores.length) {
+        setAiLoading(true);
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 5000);
+        const endpoint = compiled.errores.length ? "/explicar-error" : "/explicar";
+        fetch(`${API_URL}${endpoint}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ source, zero_based: zeroBased }),
+          signal: controller.signal,
+        })
+          .then((aiResponse) => aiResponse.ok ? aiResponse.json() : null)
+          .then((improved) => {
+            if (!improved) return;
+            setResult((current) => ({
+              ...current,
+              explicacion_ia: improved.explicacion_ia || current.explicacion_ia,
+              explicacion_semantica: improved.explicacion_semantica || current.explicacion_semantica,
+              explicacion_codigo_maquina: improved.explicacion_codigo_maquina || current.explicacion_codigo_maquina,
+              explicacion_error: improved.explicacion_error || current.explicacion_error,
+              modelo_ia: improved.modelo_ia || current.modelo_ia,
+            }));
+          })
+          .catch(() => undefined)
+          .finally(() => {
+            window.clearTimeout(timeout);
+            setAiLoading(false);
+          });
+      }
       const endpoint = compiled.errores.length ? "/explicar-error" : "/explicar";
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), 5000);
@@ -454,7 +493,7 @@ export default function App() {
       <div className="brand"><div className="brand-mark"><BrandIcon /></div><div><h1>ArithLab<span>+</span></h1><p>Tokeniza. Parsea.<br />Entiende.</p></div></div>
       <nav>{stepMenu.map(([item, targetId, icon], index) => <button key={item} className={step === index ? "nav-item active" : "nav-item"} onClick={() => openStep(item, targetId)}><span className="nav-icon nav-step-icon" aria-hidden="true">{icon}</span><span className="nav-step-number">{String(index + 1).padStart(2, "0")}</span><span>{item}</span></button>)}</nav>
       <div className="sidebar-tools"><button className={section === "Errores" ? "nav-item active" : "nav-item"} onClick={() => setSection("Errores")}><span className="nav-icon" aria-hidden="true">⚠</span><span>Errores</span></button><button className={section === "Teoría" ? "nav-item active" : "nav-item"} onClick={() => setSection("Teoría")}><span className="nav-icon" aria-hidden="true">◈</span><span>Teoría</span></button></div>
-      <div className="sidebar-foot"><span className="status-dot" /> API Python conectable<br /><small>IA: {result.modelo_ia || "determinista"}</small></div>
+      <div className="sidebar-foot"><span className="status-dot" /> API Python conectable<br /><small>{aiLoading ? "✦ Consultando Gemini..." : `IA: ${result.modelo_ia || "determinista"}`}</small></div>
     </aside>
     <main className="main-content">
       <header className="topbar"><div><p className="eyebrow">LABORATORIO / {section.toUpperCase()}</p><h2><AnimatedTitle>Simulador de compilador aritmético</AnimatedTitle></h2></div><button className="download-button" onClick={() => createReport(result, source)}>↓ Descargar reporte</button></header>
@@ -481,7 +520,7 @@ export default function App() {
         {section === "Tablas" && <div className="tables-grid section-tables"><Table title="Tabla de símbolos" headers={["Símbolo", "Dirección"]} rows={result.simbolos.map((item) => [item.symbol, <code>{item.address}</code>])} /><Table title="Tabla de tipos" headers={["Símbolo", "Tipo"]} rows={result.tipos.map((item) => [item.symbol, <span className="type-pill">{item.type}</span>])} /></div>}
         {section === "Errores" && <div className="error-view">{result.errores.length ? <>
           {result.errores.map((error) => <div className="error-box" key={error}>{error}</div>)}
-          <div className="panel ai-error-explanation"><div className="panel-heading"><div><span className="kicker">ANÁLISIS IA DEL ERROR</span><h3>Por qué ocurrió el error</h3></div><span className="ai-badge">✦ GEMINI</span></div><pre className="semantic-process">{result.explicacion_error || "La IA está preparando una explicación del error..."}</pre></div>
+          <div className="panel ai-error-explanation"><div className="panel-heading"><div><span className="kicker">ANÁLISIS IA DEL ERROR</span><h3>Por qué ocurrió el error</h3></div><span className="ai-badge">{aiLoading ? "✦ CONSULTANDO GEMINI" : "✦ GEMINI"}</span></div><pre className="semantic-process">{result.explicacion_error || "Consultando una explicación del error..."}</pre></div>
         </> : <div className="success-box">No hay errores. La expresión es válida.</div>}</div>}
         {section === "Teoría" && <div className="theory-view"><article><h4>1. Análisis léxico</h4><p>Lee la fórmula, ignora espacios y reconoce números y operadores válidos. Los caracteres desconocidos se reportan con su posición.</p></article><article><h4>2. Análisis sintáctico</h4><p>El parser de descenso recursivo aplica precedencia: primero multiplicación/división y luego suma/resta. Las operaciones iguales se agrupan de izquierda a derecha.</p></article><article><h4>3. Semántica y código máquina</h4><p>Los números únicos reciben direcciones simuladas y el AST se traduce a instrucciones PUSH, ADD, SUB, MUL, DIV y STORE R0.</p></article></div>}
       </section>}

@@ -3,6 +3,7 @@
 import json
 import os
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -177,10 +178,13 @@ def generate_explanation(source: str, result: dict) -> dict[str, str]:
         "codigo_maquina": result["codigo_maquina"],
         "pasos_resolucion": result["pasos_resolucion"],
     }
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     prompt = (
         "Eres un profesor de Teoría de Compiladores. Explica en español la "
         "evaluación de la siguiente expresión usando solo los datos reales "
         "entregados.\n"
+        f"Fecha y hora de consulta (UTC): {now}. No afirmes que conoces datos "
+        "externos; usa solo la expresión, el AST y los datos proporcionados.\n"
         "No inventes tokens, símbolos, pasos, resultados ni instrucciones.\n"
         "Primero resuelve multiplicaciones/divisiones y después sumas/restas "
         "de izquierda a derecha.\n"
@@ -218,7 +222,7 @@ def generate_explanation(source: str, result: dict) -> dict[str, str]:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=6) as response:
+            with urllib.request.urlopen(request, timeout=4) as response:
                 payload = json.loads(response.read().decode("utf-8"))
             text = _extract_response_text(payload)
             if not text:
@@ -256,9 +260,11 @@ def generate_error_explanation(source: str, errors: list[str], zero_based: bool)
     if not model:
         return {"explicacion_error": local, "modelo_ia": "determinista"}
 
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     prompt = (
         "Eres un profesor de Teoría de Compiladores. Explica en español por qué "
         "esta expresión produjo errores. Usa únicamente los errores entregados.\n"
+        f"Fecha y hora de consulta (UTC): {now}. No inventes otros errores.\n"
         "Indica qué carácter o estructura es inválida, su posición conforme a la "
         "base indicada y qué cambio mínimo haría válida la fórmula.\n"
         "Si los errores son léxicos, distingue caracteres válidos e inválidos.\n"
@@ -284,7 +290,7 @@ def generate_error_explanation(source: str, errors: list[str], zero_based: bool)
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=5) as response:
+        with urllib.request.urlopen(request, timeout=4) as response:
             payload = json.loads(response.read().decode("utf-8"))
         text = _extract_response_text(payload)
         if text:
