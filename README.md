@@ -2,7 +2,7 @@
 
 Simulador interactivo de un compilador aritmético para el proyecto final de Teoría de Compiladores. La lógica está en Python (FastAPI) y la interfaz en React + Vite. El lenguaje solo acepta números enteros y los operadores `+`, `-`, `*` y `/`.
 
-La defensa del código, con el recorrido de `10 + 25 * 10 - 4`, los imports, las estructuras y las preguntas de la profesora, está en [Análisis técnico adicional para la defensa](#defensa). El mismo material, con las figuras listas para abrir en Word, está en [`docs/ArithLab-analisis-tecnico.docx`](docs/ArithLab-analisis-tecnico.docx). Lo que sigue debajo de este párrafo se conserva igual.
+La defensa del código, con el recorrido de `10 + 25 * 10 - 4`, las figuras, los imports y las preguntas de la profesora, está en [Análisis técnico adicional para la defensa](#defensa). Cada `while`, cada `for`, cada `if` y cada `import`, línea por línea, está en [Cada ciclo, condicional e import](#ciclos). Lo que sigue debajo de este párrafo se conserva igual.
 
 ## Estructura
 
@@ -1718,7 +1718,7 @@ python -m unittest backend.pruebas
 
 ## Análisis técnico adicional para la defensa
 
-Esta parte se agrega al README que ya está arriba. No reemplaza el código ni las tablas de «qué pasa si se elimina». Sirve para explicar el programa en voz alta: qué hace cada instrucción por dentro, de dónde sale cada import y cómo responder las preguntas de la profesora. Todo está sacado de los archivos del repositorio. El Word `docs/ArithLab-analisis-tecnico.docx` trae las mismas figuras y las respuestas desarrolladas.
+Esta parte se agrega al README que ya está arriba. No reemplaza el código ni las tablas de «qué pasa si se elimina». Sirve para explicar el programa en voz alta: qué hace cada instrucción por dentro, de dónde sale cada import y cómo responder las preguntas de la profesora. Todo está sacado de los archivos del repositorio. Las figuras están en este mismo archivo, dentro de `docs/imagenes/`.
 
 ### 1. Estructura, módulos y recorrido
 
@@ -2015,3 +2015,589 @@ Vacío. Hace explícito que `backend` es un paquete, que es la condición de `fr
 El `continue` del espacio, el `indice += 1` del carácter inválido, los dos `while` del parser, la comprobación de fichas sobrantes, el `not in numeros` y el `STORE R0`. Cada una cambia un resultado que el programa ya muestra: los espacios, el fin del análisis, el 256, el 75, las direcciones únicas o el registro final.
 
 Para cerrar: el navegador envía el texto, el léxico entrega siete fichas, el parser arma `((10 + (25 * 10)) - 4)`, la semántica guarda tres direcciones y evalúa 256, y Gemini cuenta esa historia con la hora de quien está frente a la pantalla.
+
+
+<a id="ciclos"></a>
+
+## Cada ciclo, condicional e import, línea por línea
+
+Esta sección baja a cada `while`, cada `for`, cada `if`, cada `continue`, cada `return` y cada `import` del repositorio. El código de los archivos ya está más arriba. Aquí se dice qué hace esa línea por dentro, para qué está, por qué se eligió esa instrucción, qué pasa si se quita y si se puede cambiar por otra.
+
+En el backend de Python hay `while` en el léxico, en el parser y en los pasos de resolución. El único `for` clásico del compilador está en `ast_to_text` y en los recorridos de `ia.py`. En `semantico.py` y en `principal.py` el recorrido de listas se escribe como comprensión, que es un `for` en una sola línea. `App.jsx` no tiene `while` ni `for`: recorre listas con `.map()`.
+
+### `backend/lexico.py`
+
+Import, línea 7:
+
+```python
+from dataclasses import dataclass
+```
+
+Trae `dataclass` de la biblioteca estándar de Python, no de internet. Sirve para declarar `Token` con `tipo`, `valor` y `posicion` sin escribir `__init__` a mano. Es indispensable: sin él, la clase no se define y `tokenize` no puede crear fichas. La alternativa es una clase con `__init__` propio o una `namedtuple`. El programa solo usa este import en este archivo.
+
+`_OPERADORES = "+-*/"` no es un ciclo. Es la cadena que el `in` consulta. Si se borra, la línea `caracter in _OPERADORES` falla con `NameError` y el léxico no recorre nada.
+
+`@dataclass(frozen=True)` congela la ficha. Después de `Token(...)` no se puede hacer `ficha.valor = 3`. Hace falta porque el parser solo debe leer lo que el texto dijo. Si se quita `frozen=True`, la ficha se podría alterar y el árbol dejaría de coincidir con la fórmula. Se puede vivir sin congelarla, pero el proyecto la congela a propósito.
+
+El ciclo completo, que es el corazón del léxico:
+
+```python
+while indice < len(fuente):
+    caracter = fuente[indice]
+
+    if caracter.isspace():
+        indice += 1
+        continue
+
+    if caracter.isdigit():
+        inicio = indice
+        while indice < len(fuente) and fuente[indice].isdigit():
+            indice += 1
+        fichas.append(Token("NÚMERO", int(fuente[inicio:indice]), inicio + 1))
+        continue
+
+    if caracter in _OPERADORES:
+        fichas.append(Token("OPERADOR", caracter, indice + 1))
+    else:
+        errores.append(
+            f"Error léxico: carácter no válido '{caracter}' "
+            f"en la posición {indice + 1}."
+        )
+    indice += 1
+
+return fichas, errores
+```
+
+| Línea | Qué hace por dentro | Por qué esta instrucción | Si se elimina |
+|---|---|---|---|
+| `while indice < len(fuente)` | Compara el índice con la cantidad de caracteres. Mientras el índice quepa, entra al cuerpo. | El avance no es de uno en uno: un número mueve el índice varios lugares. Un `for caracter in fuente` volvería a entregar el segundo dígito que el ciclo interno ya consumió. | No hay fichas. Es indispensable. |
+| `caracter = fuente[indice]` | Lee un solo carácter, el de esa posición. | El resto de los `if` deciden sobre ese carácter, no sobre la fórmula entera. | El ciclo no tiene qué clasificar. |
+| `if caracter.isspace()` | `isspace()` es de Python. Devuelve verdadero con espacio, tabulador y salto de línea. | El lenguaje permite separar `10` y `+`. Esos huecos no son fichas. | Cada espacio de `10 + 4` cae al `else` y se reporta como error léxico. |
+| `indice += 1` del espacio | Pasa al carácter siguiente. | Alguien tiene que avanzar, porque este camino hace `continue` y no llega al incremento del final. | El espacio se revisa para siempre y `tokenize` no termina. |
+| `continue` del espacio | Salta al `while` de afuera. No ejecuta `isdigit`, ni el `if` de operadores, ni el `indice += 1` del final. | El espacio ya se consumió. Clasificarlo otra vez lo marcaría como inválido y el incremento final se saltaría el carácter de después. | `10 + 4` deja de compilar. Se pierde además el carácter que sigue al espacio. |
+| `if caracter.isdigit()` | Verdadero si el carácter es un dígito. Abre el reconocimiento de un entero. | El menos no entra aquí: está en `_OPERADORES`. Por eso `-4` al inicio no es el número negativo cuatro. | `10` no se reconoce como número. Cada dígito cae al error léxico. |
+| `inicio = indice` | Guarda la posición del primer dígito antes de que el ciclo interno mueva `indice`. | La ficha necesita el lugar del primer carácter, y `int` necesita el recorte completo `10`, no solo el último dígito. | La posición y el valor del número salen mal, o la línea del `Token` falla si `inicio` no existe. |
+| `while indice < len(fuente) and fuente[indice].isdigit()` | Sigue mientras quede texto y el carácter actual siga siendo dígito. Las dos condiciones van con `and`: si se acaba el texto, no se lee `fuente[indice]` fuera de rango. | Un `for` de un paso no puede comerse `10` o `25` como una sola ficha. | `10` se partiría o el primer dígito se trataría solo. El resultado dejaría de ser 256. |
+| `indice += 1` interior | Avanza un dígito. | Es el único avance dentro de este `while`. | El mismo dígito se lee siempre y la función no termina. |
+| `fichas.append(Token(...))` | `fuente[inicio:indice]` recorta los dígitos. `int(...)` los convierte. `inicio + 1` cuenta desde 1. `append` deja la ficha al final de la lista. | El orden de `append` es el orden de la fórmula. El parser lee esa lista de izquierda a derecha. | No hay ficha `NÚMERO`. El parser no tiene hojas. |
+| `continue` del número | El índice ya quedó después del último dígito. Salta el incremento del final. | Si también se ejecutara `indice += 1` del final, se perdería el operador que viene después del número. | `10+4` se saltaría el `+`. |
+| `if caracter in _OPERADORES` | Pregunta si el carácter es uno de `+ - * /`. | Son los únicos operadores del lenguaje. | `+ - * /` caerían al `else` y toda fórmula válida sería error léxico. |
+| `fichas.append` del operador | Crea `OPERADOR` con el símbolo y la posición `indice + 1`. | Misma lista y mismo orden que los números. | El parser no vería sumas ni productos. |
+| `else` | Cualquier otro carácter: `$`, `&`, un punto, una letra. | El ciclo no se detiene en el primero. Por eso `7 $ 3 & 2` reporta dos errores. | El carácter inválido se ignoraría y la fórmula parecería válida. |
+| `errores.append(...)` | Arma el texto con el carácter y la posición desde 1. | `principal.py` copia esa lista a la respuesta. La prueba busca «posición 3». | El carácter malo no se podría señalar. |
+| `indice += 1` del final | Avanza después de un operador o de un carácter inválido. | Esos dos caminos no avanzaron antes. | Un `$` o un `+` dejan el `while` sin terminar. |
+| `return fichas, errores` | Devuelve las dos listas, aunque una esté vacía. | `compile_expression` las abre en `fichas, errores_lexicos`. | La función devolvería `None` y la ruta fallaría al desempaquetar. |
+
+No hay `for` en `lexico.py`. No hace falta: no se recorre una lista ya hecha, se decide sobre la marcha cuántos caracteres forman la siguiente ficha.
+
+`token_as_dict` no tiene ciclo. Su `return` arma `type`, `value` y `position` porque `App.jsx` lee esos nombres en inglés. Si se elimina la función, `/compilar` no puede serializar las fichas.
+
+![Fichas de 10 + 25 * 10 - 4](docs/imagenes/05-fichas.png)
+
+Con `10 + 25 * 10 - 4` el `while` exterior da estas vueltas útiles: salta el espacio, junta `10` en la posición 1, toma `+` en la 4, junta `25` en la 6, toma `*` en la 9, junta el segundo `10` en la 11, toma `-` en la 14 y junta `4` en la 16. Siete `append` de fichas y ningún `append` de error.
+
+### `backend/sintactico.py`
+
+Imports:
+
+```python
+from dataclasses import dataclass
+from .lexico import Token
+```
+
+`dataclass` otra vez, de la biblioteca estándar, para `ASTNode`. `from .lexico import Token` es un import relativo: el punto significa «el paquete `backend`». Solo se usa como tipo de la lista que recibe el parser. Si se quita, el archivo no carga y no hay árbol. No está sin usar.
+
+`ASTNode.to_dict` no tiene ciclo. Tiene dos condicionales en la misma línea:
+
+```python
+"left": self.izquierda.to_dict() if self.izquierda else None,
+"right": self.derecha.to_dict() if self.derecha else None,
+```
+
+`self` es el nodo actual. Si el hijo existe, la función se llama a sí misma y el diccionario baja por el árbol. Si el hijo es `None`, escribe `None` y la recursión se corta. Sin esos dos `if`, una hoja llamaría `to_dict` sobre `None` y la ruta explotaría. El SVG de `App.jsx` lee `value`, `left` y `right`. Es indispensable para dibujar. Una alternativa sería recorrer el árbol con una pila explícita. El resultado JSON tendría que seguir usando esas tres claves.
+
+`Parser.__init__` guarda `self.fichas` y pone `self.posicion = 0`. `self` es el objeto concreto. Sin él, `expression` y `factor` no compartirían el cursor.
+
+`parse`:
+
+```python
+if not self.fichas:
+    raise ValueError("La entrada no contiene una expresión.")
+nodo = self.expression()
+if self.posicion != len(self.fichas):
+    ficha = self.fichas[self.posicion]
+    raise ValueError(
+        f"Error sintáctico: se esperaba un número en la posición {ficha.posicion}."
+    )
+return nodo
+```
+
+El primer `if` rechaza la lista vacía. `not` invierte el valor: una lista vacía es falsa en Python, así que `not self.fichas` es verdadero y se lanza el error. Si se quita, `expression` sigue y el fallo aparece más abajo, con otro mensaje. El segundo `if` compara el cursor con `len(self.fichas)`. Si no son iguales, sobró texto. Quitarlo permite aceptar una fórmula a medias. El `return` entrega la raíz. Es indispensable.
+
+`expression` y su `while`:
+
+```python
+nodo = self.term()
+while self._matches("+", "-"):
+    operador = self._consume().valor
+    nodo = ASTNode(operador, nodo, self.term())
+return nodo
+```
+
+| Parte | Qué significa |
+|---|---|
+| `self` | El parser que está leyendo. Lleva `fichas` y `posicion`. |
+| `._matches` | Método que mira la ficha actual y no la consume. |
+| `("+", "-")` | El `*` del parámetro empaqueta esos dos textos. Solo este nivel acepta suma y resta. |
+| `while` | Repite mientras la condición sea verdadera. Puede ser cero veces: un solo número no entra al ciclo y se devuelve la hoja. |
+| `_consume().valor` | Avanza el cursor y se queda con `+` o `-`. |
+| `ASTNode(operador, nodo, self.term())` | El nodo ya leído queda a la izquierda. `term()` lee el lado derecho, y ahí ya se resolvieron `*` y `/`. |
+
+Si este `while` se cambia por un `for`, habría que saber de antemano cuántas sumas hay. Cada vuelta además gasta una cantidad distinta de fichas, porque `term()` puede leer un producto entero. Por eso el proyecto usa `while`. Si se elimina el ciclo, `100 - 20 - 5` se queda en `100` y `parse` ve fichas sin leer.
+
+`term` es el mismo molde con `while self._matches("*", "/")` y con `self.factor()` en lugar de `self.term()`. Se llama desde `expression` antes de crear el nodo `+` o `-`. Esa llamada, no una tabla aparte, es la precedencia. Si se elimina este `while`, `8 / 2 / 2` no se agrupa como `((8 / 2) / 2)`.
+
+![Por qué * y / se resuelven primero](docs/imagenes/04-precedencia.png)
+
+`factor`:
+
+```python
+if self.posicion >= len(self.fichas):
+    raise ValueError("Error sintáctico: falta un número al final.")
+ficha = self._consume()
+if ficha.tipo != "NÚMERO":
+    raise ValueError(
+        f"Error sintáctico: se esperaba un número en la posición {ficha.posicion}."
+    )
+return ASTNode(ficha.valor)
+```
+
+El primer `if` usa `>=` para no leer fuera de la lista. En `10 +` el cursor ya no tiene ficha cuando se pide el segundo número. El segundo `if` compara `tipo` con `"NÚMERO"`. `!=` es «distinto de». Un operador donde iba un número es error sintáctico. El `return` crea la hoja: los hijos quedan en `None` por el valor por defecto de la clase. Quitar el primer `if` hace que `_consume` lea una posición que no existe. Quitar el segundo deja colar un operador como hoja.
+
+`_matches`:
+
+```python
+return (
+    self.posicion < len(self.fichas)
+    and self.fichas[self.posicion].tipo == "OPERADOR"
+    and self.fichas[self.posicion].valor in operadores
+)
+```
+
+Son tres comparaciones unidas por `and`. Si la primera falla, Python no evalúa las otras y no se sale de la lista. `<` comprueba que haya ficha. `==` exige el tipo. `in` exige que el símbolo sea uno de los que pidió el nivel: `+` y `-` en `expression`, `*` y `/` en `term`. No incrementa `posicion`. Si consumiera, el operador se perdería antes de `_consume`. Si se elimina la función, los dos `while` no saben cuándo parar.
+
+`_consume` copia la ficha actual, hace `self.posicion += 1` y la devuelve. Sin el incremento, el parser leería siempre la misma ficha.
+
+El único `for` de este archivo está en `ast_to_text`:
+
+```python
+resultado = f"{prefijo}{'└── ' if es_ultimo else '├── '}({nodo.valor})\n"
+hijos = [hijo for hijo in (nodo.izquierda, nodo.derecha) if hijo is not None]
+for indice_hijo, hijo in enumerate(hijos):
+    resultado += ast_to_text(
+        hijo,
+        prefijo + ("    " if es_ultimo else "│   "),
+        indice_hijo == len(hijos) - 1,
+    )
+return resultado
+```
+
+La comprensión `[hijo for hijo in ... if hijo is not None]` es un `for` que arma una lista de uno o dos hijos, saltando los `None` de una hoja. El `for indice_hijo, hijo in enumerate(hijos)` recorre esa lista corta. `enumerate` entrega el índice y el hijo. El último hijo lleva `└──` porque `indice_hijo == len(hijos) - 1`. Aquí sí cabe un `for`: la cantidad de hijos ya se conoce y cada vuelta avanza un hijo. Un `while` también serviría, pero habría que llevar el índice a mano. Si se quita el `for`, el dibujo se queda en la raíz. El SVG no usa esta función: usa `to_dict`. Gemini y el recuadro de texto sí la usan.
+
+![Árbol de 10 + 25 * 10 - 4](docs/imagenes/02-ast.png)
+
+### `backend/semantico.py`
+
+```python
+from .sintactico import ASTNode
+```
+
+Import relativo. Trae la clase del nodo para anotar los parámetros. Si se quita, el archivo no carga y `/compilar` no puede pedir tablas, valor ni pila. Se usa en las firmas. No hay otro import. `_OPERACIONES_MAQUINA` no se importa: es un diccionario de este archivo, `"+"` hacia `"ADD"`, `"-"` hacia `"SUB"`, `"*"` hacia `"MUL"` y `"/"` hacia `"DIV"`.
+
+`_format_number` no tiene ciclo. El `if` de una línea distingue `int` de `float`. Un entero se escribe sin decimal. Un real usa hasta 10 cifras significativas, para que `3.84` no salga con basura de punto flotante. Si se quita, los pasos de la pantalla se ven mal. El cálculo puede seguir.
+
+`build_tables` no usa `while`. Usa dos comprensiones, que son `for`:
+
+```python
+simbolos = [
+    {"symbol": numero, "address": f"dir_{indice + 1}"}
+    for indice, numero in enumerate(numeros)
+]
+tipos = [{"symbol": numero, "type": "entero"} for numero in numeros]
+```
+
+`enumerate` numera desde 0, y `indice + 1` produce `dir_1`, `dir_2`, `dir_3`. El tipo es siempre `"entero"` porque el léxico solo crea enteros. Si se borra una comprensión, esa tabla vuelve vacía. Una alternativa es un `for` con `append`. El resultado tiene que seguir usando las claves `symbol`, `address` y `type`, porque las lee `App.jsx`.
+
+`_collect_numbers`:
+
+```python
+if isinstance(nodo.valor, int) and nodo.valor not in numeros:
+    numeros.append(nodo.valor)
+if nodo.izquierda:
+    _collect_numbers(nodo.izquierda, numeros)
+if nodo.derecha:
+    _collect_numbers(nodo.derecha, numeros)
+```
+
+No es un `for` ni un `while`: es recursión. El primer `if` une dos preguntas. `isinstance(..., int)` separa una hoja de un operador, porque el operador guarda un texto. `not in numeros` impide el segundo `10`. `append` lo agrega al final, así el orden es el de aparición. Los dos `if` de los hijos bajan solo si el hijo no es `None`. Una hoja no entra. Si se quita `not in numeros`, el `10` de `10 + 25 * 10 - 4` gana dos direcciones y la prueba de símbolos falla. Si se quita un `if` de hijo, ese lado del árbol no aporta números.
+
+`evaluate`:
+
+```python
+if isinstance(nodo.valor, int):
+    return nodo.valor
+izquierda = evaluate(nodo.izquierda)
+derecha = evaluate(nodo.derecha)
+if nodo.valor == "+":
+    return izquierda + derecha
+if nodo.valor == "-":
+    return izquierda - derecha
+if nodo.valor == "*":
+    return izquierda * derecha
+if derecha == 0:
+    raise ZeroDivisionError("No se puede dividir entre cero.")
+resultado = izquierda / derecha
+return int(resultado) if resultado.is_integer() else resultado
+```
+
+El primer `if` corta la recursión en la hoja. Sin ese `return`, `evaluate` se llamaría sobre `None`. Los tres `if` siguientes comparan el símbolo con `==` y devuelven la operación. Están en ese orden porque, si el nodo era `+`, la función ya regresó y no sigue hacia la división. Si se borra el `if` de `*`, `25 * 10` cae en la división y el 256 desaparece. El `if derecha == 0` solo se alcanza cuando el operador no fue `+`, `-` ni `*`, o sea cuando es `/`. Sin él, `10 / 0` revienta con el mensaje de Python, fuera de esta frase. El `return` final usa un `if` en línea: `8 / 2` vuelve a `2`, y `96 / 25` se queda en `3.84`. Estos `if` no se reemplazan por un `for`. Son decisiones, no un recorrido.
+
+`generate_machine_code` tampoco usa `for`. `emitir` es recursiva:
+
+```python
+if isinstance(actual.valor, int):
+    instrucciones.append(f"PUSH {actual.valor}")
+    return
+emitir(actual.izquierda)
+emitir(actual.derecha)
+instrucciones.append(_OPERACIONES_MAQUINA[str(actual.valor)])
+```
+
+El `if` de la hoja hace `append` de `PUSH` y el `return` evita seguir hacia los hijos, que son `None`. En un operador se visita primero la izquierda, después la derecha y al final se traduce el símbolo. Ese orden es el postorden. El `append` de `"STORE R0"` está fuera de `emitir`, una sola vez. Si se quita, la pila calcula 256 y nadie lo guarda en `R0`. Si se cambia el orden de las dos llamadas, `MUL` llegaría antes de tener los dos números en el orden del árbol.
+
+![Código de pila en postorden](docs/imagenes/03-pila.png)
+
+`build_resolution_steps` mezcla recursión, un `for` y un `while`.
+
+`aplanar` es recursiva. Si el nodo es entero, `valores.append`. Si no, baja a la izquierda, hace `operadores.append` y baja a la derecha. Así los operadores quedan entre sus operandos.
+
+`formatear_expresion` sí usa `for`:
+
+```python
+partes: list[str] = [_format_number(valores[0])]
+for indice, operador in enumerate(operadores):
+    partes.extend([operador, _format_number(valores[indice + 1])])
+return " ".join(partes)
+```
+
+El `for` recorre los operadores que todavía no se han reducido. `extend` agrega dos textos de una vez: el símbolo y el número de la derecha. `indice + 1` funciona porque hay un valor más que operadores. Un `while` obligaría a llevar el índice a mano. Si se quita el `for`, después de cada reducción no se puede mostrar la fórmula que va quedando.
+
+El `while operadores:` sigue mientras la lista no esté vacía. Una lista vacía es falsa, así que el ciclo para cuando ya no quedan operaciones.
+
+```python
+prioridad = max(2 if operador in "*/" else 1 for operador in operadores)
+indice_operador = next(
+    indice
+    for indice, operador in enumerate(operadores)
+    if (2 if operador in "*/" else 1) == prioridad
+)
+```
+
+El `for` de dentro de `max` no es un ciclo suelto: visita cada operador y le da 2 si está en la cadena `"*/"`, o 1 si es `+` o `-`. `max` se queda con el número más alto. Por eso `*` y `/` se atienden antes. `next` con otro `for` devuelve el primer índice que tiene esa prioridad, o sea el de más a la izquierda. Si se cambia el `max` por «el primero de la lista», `96 / 25` dejaría de ser el primer paso de `25 - 24 - 26 + 36 + 96 / 25`.
+
+Después vienen los `if` del cálculo de ese paso:
+
+```python
+if operador == "+":
+    resultado = izquierda + derecha
+elif operador == "-":
+    resultado = izquierda - derecha
+elif operador == "*":
+    resultado = izquierda * derecha
+elif derecha == 0:
+    raise ZeroDivisionError("No se puede dividir entre cero.")
+else:
+    resultado = izquierda / derecha
+```
+
+`elif` solo se mira si el `if` anterior fue falso. El `else` es la división, el único operador que queda. El `if` de después, `isinstance(resultado, float) and resultado.is_integer()`, vuelve a entero un decimal `.0`. Luego `valores[indice_operador : indice_operador + 2] = [resultado]` reemplaza los dos números por el resultado, y `operadores.pop(indice_operador)` quita ese operador. Sin el `pop`, el `while` no acorta la lista y no termina. `pasos.append` guarda `calculation`, `expression` y `priority`. El `return pasos` entrega la lista cuando el `while` ya no tiene operadores.
+
+### `backend/ia.py`
+
+Imports, todos usados en este archivo:
+
+| Línea | Qué trae | De dónde | Si se elimina |
+|---|---|---|---|
+| `import json` | `dumps` y `loads`. | Biblioteca estándar. | No se arma el cuerpo de Gemini ni se lee su respuesta. `ia.py` no carga. `/compilar` no lo necesita. |
+| `import os` | `getenv` y, en las pruebas, el entorno. | Biblioteca estándar. | No se lee `GEMINI_API_KEY` ni `GEMINI_MODEL`. |
+| `import re` | `split` para partir párrafos. | Biblioteca estándar. | La explicación puede quedar en un solo bloque. El cálculo sigue. |
+| `import urllib.error` | `URLError`, para el `except`. | Biblioteca estándar. | Un fallo de red no se captura y la ruta se cae. |
+| `import urllib.request` | `Request` y `urlopen`. | Biblioteca estándar. | No sale el POST a Gemini. |
+| `from datetime import datetime` | La hora local. | Biblioteca estándar. | No se puede elegir el saludo si el navegador no mandó uno. |
+| `from pathlib import Path` | La ruta de `backend/.env`. | Biblioteca estándar. | `load_dotenv` no sabe qué archivo abrir. |
+| `from dotenv import load_dotenv` | Lee el `.env`. | Paquete `python-dotenv`, en `requirements.txt`. | El compilador calcula. La clave no entra al proceso. |
+
+No hay un import de `ia.py` que esté escrito y no se use.
+
+`load_dotenv(Path(__file__).with_name(".env"))` se ejecuta al importar el archivo. `__file__` es la ruta de `ia.py`. `with_name` cambia el nombre y deja `backend/.env`. Así la clave se lee aunque Uvicorn arranque en la raíz del proyecto.
+
+`current_time_context` decide el saludo con `if` / `elif` / `else`, no con un ciclo: antes de las 12 es «Buenos días», antes de las 19 es «Buenas tardes», y el `else` es «Buenas noches». El `for` de después recorre una tupla de tres textos:
+
+```python
+for opcion in ("Buenos días", "Buenas tardes", "Buenas noches"):
+    if texto.startswith(opcion.lower()):
+        saludo = opcion
+        break
+```
+
+`startswith` mira si `hora_cliente` ya trae ese saludo. `break` sale del `for` en cuanto uno coincide. Sin `break` seguiría y podría pisar el saludo con una opción posterior que también coincidiera, cosa que aquí no pasa porque las tres frases son distintas. Si se quita el `for`, se usa solo la hora del servidor. Un `while` no aporta: son exactamente tres opciones y el `for` las entrega una a una. El `return` devuelve `saludo` y `presentacion`.
+
+`_enumerate_nodes` no tiene `for`. `recorrer` es recursiva. `if not nodo: return` corta en un hijo vacío. `nodos.append` numera `N1`, `N2`, `N3` en preorden: el nodo, luego la izquierda, luego la derecha. Es el mismo orden de las bolitas. Si se quita la recursión de `left` o de `right`, Gemini no puede nombrar ese lado. El SVG numera por su cuenta y seguiría dibujando.
+
+`_stack_trace` sí usa `for`:
+
+```python
+for instruccion in instrucciones:
+    antes = [format_number(elemento) for elemento in pila]
+    if instruccion.startswith("PUSH "):
+        pila.append(int(instruccion.removeprefix("PUSH ")))
+    elif instruccion in _OPERACIONES_PILA:
+        derecha = pila.pop()
+        izquierda = pila.pop()
+        ...
+        pila.append(resultado)
+    elif instruccion == "STORE R0" and pila:
+        efecto = f"R0 queda en {format_number(pila[-1])}"
+    rastro.append({...})
+```
+
+El `for` visita cada instrucción una vez, en el orden en que `generate_machine_code` las emitió. Aquí el paso es fijo, una instrucción por vuelta, así que `for` es la herramienta directa. Un `while` con un índice haría lo mismo con más código. El primer `if` mete el número del `PUSH`. El `elif` de la operación saca dos valores con `pop`: el de la derecha sale primero, porque fue el último en entrar. El `elif` de `STORE R0` solo anota el tope si la pila no está vacía. `rastro.append` guarda la pila de antes, la de después y el cálculo. Si se quita el `for`, Gemini no recibe el efecto real de cada línea. Si se quita solo el `if` del `PUSH`, las operaciones de después leen una pila vacía.
+
+`_model_candidates` usa `for modelo in ordenados` para quitar repetidos con `if modelo and modelo not in unicos` y `unicos.append`. El orden es el del `.env`, luego `gemini-3.5-flash-lite`, `gemini-3.5-flash` y `gemini-flash-lite-latest`. Si se elimina el `for`, no hay nombre para la URL.
+
+`_extract_response_text` tiene `if not candidatos: return ""`. Sin candidatos, no hay texto. El `join` junta las partes del primer candidato. Si se elimina la función, el JSON de Google no se convierte en explicación.
+
+`_parse_json_object` tiene varios `if`. Si el texto empieza por triple comilla invertida, recorta el bloque. Si `json.loads` falla, busca la primera `{` y la última `}`. Si no hay llaves, `return None`. El `return` final solo acepta un diccionario. Si se elimina, un JSON envuelto se descarta y la tarjeta queda en error.
+
+`_ask_gemini`:
+
+```python
+for modelo in _model_candidates():
+    try:
+        texto = _post_prompt(clave, modelo, consigna, tipo_mime)
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as fallo:
+        ultimo_fallo = str(fallo)
+        continue
+    if texto:
+        return texto, modelo
+```
+
+El `for` prueba cada modelo. `continue` salta al siguiente cuando ese modelo falló. Si se quita el `continue`, el flujo seguiría con `texto` sin definir. El `return` de dentro sale del `for` en el primer modelo que conteste. Si ninguno contesta, se lanza `RuntimeError`. Un solo modelo, sin el `for`, dejaría la explicación sin intento de respaldo cuando el nombre configurado responde 404.
+
+`generate_explanation` tiene cuatro cortes. `if not clave` devuelve el texto local y no llama a la red. `if not objeto` rechaza una respuesta que no es JSON. El `if not texto_ia or not texto_arbol or not semantica or not tipos or not maquina` exige los cinco textos. `or` basta con que uno esté vacío para entrar al fallo. Si se quita ese `if`, una respuesta a medias se mostraría como completa.
+
+`generate_error_explanation` usa `if not clave` para armar «no pudo compilarse» y marcar el resto de las fases como detenidas. El diccionario `{nombre: fase_detenida for nombre in _CAMPOS_ERROR}` es un `for` sobre las ocho claves. Con clave, `if not objeto` y `if any(not campos[nombre] for nombre in _CAMPOS_ERROR)` rechazan una respuesta incompleta. `any` recorre las claves y se detiene en la primera vacía. Si se quita, una fase quedaría en blanco.
+
+`_order_by_marker` y `_order_machine_explanation` empiezan con un `if` sobre la cantidad de saltos de línea. Si Gemini ya partió el texto, `return` y no se toca. Si lo pegó en un párrafo, `re.split` lo parte. Esos `if` son de presentación. El 256 no depende de ellos.
+
+### `backend/principal.py`
+
+Imports. Todos se usan:
+
+| Import | Origen | Para qué | Si se elimina |
+|---|---|---|---|
+| `import re` | Biblioteca estándar. | Reescribe «posición N» cuando la base es cero. | El interruptor no cambia el texto del error. El léxico sigue numerando desde 1. |
+| `FastAPI` | Paquete `fastapi` 0.115.6. | Crea `app`. Uvicorn busca ese nombre. | El servidor no arranca. |
+| `CORSMiddleware` | El mismo paquete, módulo `fastapi.middleware.cors`. | Deja entrar a `localhost`, `127.0.0.1` y a `vercel.app`. | El backend compila y el navegador bloquea la respuesta. |
+| `AliasChoices`, `BaseModel`, `ConfigDict`, `Field` | Paquete `pydantic`, que instala FastAPI. | Aceptan `source` o `fuente`, y `zero_based` o `base_cero`. | El JSON de `App.jsx` se rechaza. |
+| `generate_explanation`, `generate_error_explanation` | `from .ia`, import relativo. | `/explicar` y `/explicar-error`. | El cálculo de `/compilar` sigue. Las tarjetas no. |
+| `Token`, `token_as_dict`, `tokenize` | `from .lexico`. | Primera fase y el JSON de las fichas. | No hay `/compilar`. |
+| `Parser`, `ast_to_text` | `from .sintactico`. | Árbol y dibujo de texto. | No hay AST. |
+| `build_resolution_steps`, `build_tables`, `evaluate`, `generate_machine_code` | `from .semantico`. | Tablas, 256, pila y pasos. | La fase que se quite vuelve vacía. |
+
+No sobra ninguno. `health` no tiene condicional: siempre hace `return {"ok": True, "service": "arithlab-backend"}`.
+
+`_convert_error_positions`:
+
+```python
+if not base_cero:
+    return errores
+return [re.sub(r"posición (\d+)", _shift_position, mensaje) for mensaje in errores]
+```
+
+Si el interruptor está apagado, el primer `if` devuelve los mensajes iguales y no resta. La comprensión es un `for` sobre cada mensaje. `_shift_position` lee el número con `group(1)` y le resta 1. En `7 $ 3 & 2` las posiciones 3 y 7 pasan a 2 y 6. Si se quita el `if`, con la base en 1 también se restaría y las posiciones quedarían corridas.
+
+`compile_expression`, en orden:
+
+```python
+if solicitud.base_cero:
+    fichas = [Token(ficha.tipo, ficha.valor, ficha.posicion - 1) for ficha in fichas]
+    errores_lexicos = _convert_error_positions(errores_lexicos, True)
+```
+
+El `if` solo entra cuando el navegador mandó `zero_based: true`. La comprensión construye fichas nuevas porque `Token` está congelado: no se puede cambiar `posicion` en la ficha vieja. Si se quita el `if`, el interruptor no mueve ninguna posición.
+
+```python
+"base_posiciones": 0 if solicitud.base_cero else 1,
+```
+
+Ese `if` en línea elige el número que la interfaz muestra como base. No cambia el cálculo.
+
+```python
+if not solicitud.fuente.strip():
+    respuesta["errores"] = ["La entrada está vacía. Escribe una expresión aritmética."]
+    return respuesta
+if errores_lexicos:
+    return respuesta
+```
+
+`strip()` quita espacios de los extremos. `not` detecta la caja vacía o llena solo de espacios. El `return` sale antes del parser. El segundo `if` sale si hubo `$` o `&`. Sin ese `return`, el parser recibiría caracteres que no son fichas válidas y el mensaje léxico se perdería. Los dos `return` son indispensables para el contrato de las fases.
+
+El `try` llama, en este orden, a `Parser(fichas).parse()`, `build_tables`, `evaluate`, `generate_machine_code` y `build_resolution_steps`. `respuesta.update` llena `ast`, `ast_text`, `simbolos`, `tipos`, `resultado`, `codigo_maquina` y `pasos_resolucion`. El `except (ValueError, ZeroDivisionError)` convierte el error de sintaxis o la división entre cero en `errores`. Si se quita el `except`, esos fallos salen como error 500 y la interfaz dice que el backend no está disponible. El `return respuesta` del final entrega el diccionario, con las explicaciones vacías.
+
+`explain_expression`:
+
+```python
+if compilado.get("errores") or compilado.get("ast") is None:
+    return { ..., "ia_error": "No hay una fórmula válida para que Gemini la explique." }
+return generate_explanation(...)
+```
+
+`or` entra si hay errores o si no hubo árbol. Sin este `if`, Gemini recibiría un árbol vacío. El `return` de abajo es el que pide el relato.
+
+`explain_error` hace lo contrario: `if not compilado.get("errores")` regresa «La expresión no contiene errores» y no gasta una llamada. Si sí hay errores, `return generate_error_explanation(...)`.
+
+![Recorrido de una fórmula](docs/imagenes/01-recorrido.png)
+
+### `backend/pruebas.py`
+
+```python
+import os
+import unittest
+from .lexico import tokenize
+from .principal import CompileRequest, compile_expression, explain_error
+```
+
+`os` y `unittest` son de la biblioteca estándar. `tokenize`, `CompileRequest`, `compile_expression` y `explain_error` son imports relativos y se usan en las pruebas. No se importa `explain_expression`. No hace falta: ninguna prueba llama a Gemini con una fórmula válida. No hay import sin usar.
+
+`setUp` hace `os.environ.pop("GEMINI_API_KEY", None)` antes de cada prueba, para no salir a la red. `tearDown` tiene un `if self._clave_gemini is not None` y solo entonces devuelve la clave. `self` es el objeto de la prueba. Sin el `if`, cuando no había clave se escribiría `None` en el entorno. Quitar `setUp` no apaga el simulador. Si hay una clave real, la prueba del error esperaría a Gemini.
+
+Las pruebas no tienen `while`. Comparan con `assertEqual` y `assertIn`. Hay comprensiones de una línea, como `[elemento["symbol"] for elemento in resultado["simbolos"]]`, que es un `for` para armar la lista `[10, 25, 4]`. `if __name__ == "__main__"` solo entra cuando el archivo se ejecuta directo. `python -m unittest backend.pruebas` no necesita ese `if`.
+
+### `frontend/src/main.jsx`
+
+No hay ciclos ni clases. Los imports son:
+
+| Línea | Qué carga | De dónde | Si se elimina |
+|---|---|---|---|
+| `import React from "react"` | El objeto `React`. | Paquete `react` 18, en `frontend/package.json`. | `React.StrictMode` no existe y el archivo no carga. Se podría cambiar por `import { StrictMode } from "react"` y usar `<StrictMode>`. |
+| `import { createRoot } from "react-dom/client"` | La función que monta la página. | Paquete `react-dom`. | Nadie dibuja dentro de `#root`. La página queda en blanco. |
+| `import "bootstrap/dist/css/bootstrap.min.css"` | La hoja de Bootstrap. | Paquete `bootstrap` 5.3.3. | El simulador abre. Las tablas pierden la rejilla de Bootstrap. |
+| `import "./styles.css"` | El tema del proyecto. | Archivo propio. El `./` es un import relativo de Vite. | `main.jsx` no encuentra el archivo y la página no arranca, salvo que también se quite esta línea. |
+| `import App from "./App"` | El simulador. | `App.jsx`, al lado. | No hay pantalla que montar. |
+
+`createRoot(document.getElementById("root")).render(...)` busca el `div` del HTML y pinta `<App />`. `StrictMode` no es un ciclo. En desarrollo, React revisa dos veces algunos efectos. Si se quita, la aplicación se ve igual.
+
+`frontend/vite.config.js` importa `defineConfig` de `vite` y `react` de `@vitejs/plugin-react`. Los dos se usan en `plugins: [react()]`. Si se quita el plugin, Vite no transforma el JSX.
+
+### `frontend/src/App.jsx`
+
+El único import es:
+
+```javascript
+import { useEffect, useMemo, useState, useRef } from "react";
+```
+
+Los cuatro salen del paquete `react` y los cuatro se usan. `useState` guarda la fórmula, el resultado y la vista. `useEffect` arma el reloj, la voz del árbol y el texto que se escribe solo. `useMemo` recalcula las métricas cuando cambia `result`. `useRef` guarda el arrastre, el número de la petición y el aborto de Gemini. No hay un nombre importado que sobre. Si se quita el import completo, el archivo no carga. Si se quita solo `useMemo`, la línea de las métricas falla.
+
+`API_URL` usa `import.meta.env.VITE_API_URL`. Eso no es un import de librería: Vite lee `frontend/.env`. Si la variable no existe, `||` deja `http://localhost:8000`. Sin ese respaldo, en local la petición iría a `undefined/compilar`.
+
+En este archivo no hay `while` ni `for`. Donde Python usaría un `for`, aquí hay `.map()`. `.map()` visita cada elemento, llama una función y arma una lista nueva. No modifica la lista original. Un `for` con `push` dibujaría lo mismo, pero en React el `map` es lo que va dentro del JSX.
+
+Recorridos con `.map()`:
+
+| Dónde | Qué recorre | Qué pinta | Si se quita el `map` |
+|---|---|---|---|
+| `Array.from(children).map` en `AnimatedTitle` | Cada letra del título. | Una letra animada. | El título no aparece. |
+| `headers.map` y `rows.map` y `row.map` en `Table` | Encabezados, filas y celdas. | La tabla de símbolos y la de tipos. | Esas tablas no se dibujan. `rows.length` es el `if`: si es 0, muestra la frase vacía. |
+| `stepMenu.map` | Los ocho pasos del menú. | El botón de cada fase. La clase `active` depende de `step === index`. | El menú lateral queda vacío. |
+| `pipeline.map` | Los nombres de la barra 01 a 08. | El recorrido de arriba. | La barra no se dibuja. |
+| `examples.map` | Las cuatro fórmulas de ejemplo. | Los botones Válido, Izquierda, Repetidos y Con error. | Esos botones desaparecen. El área de texto sigue. |
+| `result.errores.map` | Cada mensaje de error. | Una línea roja por error. | Los errores solo se verían en la otra vista, o en ninguna si también se quita el otro `map`. |
+| `result.tokens.map` | Cada ficha. | La pastilla con el valor y el tipo. | No se ven las fichas, aunque `/compilar` las haya devuelto. |
+| `result.simbolos.map` y `result.tipos.map` | Las filas que armó `build_tables`. | Las dos tablas. | Las tablas quedan sin filas. |
+| `result.codigo_maquina.map` | Cada instrucción. | El número de línea, el texto y la etiqueta. | No se ve la pila en la pantalla. El backend igual la calculó. |
+| `connections.map` dentro de `AstSvg` | Cada arista. | Una línea del SVG. | El árbol queda sin líneas. |
+| `nodes.map` dentro de `AstSvg` | Cada nodo. | Una bolita. | El árbol queda sin círculos. |
+
+El `map` del código máquina tiene un condicional anidado, no un ciclo:
+
+```javascript
+instruction.startsWith("PUSH")
+  ? "cargar"
+  : instruction === "STORE R0"
+    ? "guardar"
+    : "operar"
+```
+
+Es un `if` escrito con `?` y `:`. `PUSH 10` muestra «cargar». `STORE R0` muestra «guardar». `MUL`, `ADD`, `SUB` y `DIV` muestran «operar». Si se quita, la instrucción seguiría en la lista y perdería esa palabra. No cambia el 256.
+
+Condicionales que deciden el flujo, no el dibujo de una lista:
+
+`clientClock` no tiene ciclo. Dos ternarios: hora menor que 12 es mañana, menor que 19 es tarde, y el resto es noche. Arma `hora_cliente` para Gemini. Si se elimina la función, el saludo deja de salir del reloj del navegador.
+
+`countNodes` es recursiva, no es un `while`. `node ? 1 + countNodes(node.left) + countNodes(node.right) : 0` suma 1 si el nodo existe. El `: 0` corta la recursión. Si se elimina, la métrica «Nodos del AST» no se puede calcular.
+
+`leafCount`, dentro de `AstSvg`:
+
+```javascript
+if (!current) return 0;
+if (!current.left && !current.right) return 1;
+return leafCount(current.left) + leafCount(current.right);
+```
+
+El primer `if` corta en un hijo que no existe. El segundo reconoce una hoja y devuelve 1. El `return` final suma las hojas de los dos lados. Sirve para repartir el ancho. Si se quita, `flatten` no sabe dónde colocar cada bolita. Un `for` no recorre un árbol de profundidad variable sin una pila propia. La recursión es la forma que usa el archivo.
+
+`flatten` también es recursiva. `if (!current) return` no hace nada cuando el lado no existe. Si no, calcula el centro del tramo, hace `nodes.push` (el equivalente de `append`) y se llama con el hijo izquierdo y después con el derecho. Si se quita una de las dos llamadas, ese lado no se dibuja.
+
+El `useEffect` de la voz no es un `while`. `advance` se llama a sí misma con `step + 1`. El corte es:
+
+```javascript
+if (cancelled) return;
+if (step >= connections.length) {
+  setConnectionStep(connections.length);
+  setIsBuilding(false);
+  return;
+}
+```
+
+`>=` detecta que ya se narraron todas las aristas. Sin ese `if`, `advance` pediría una conexión que no existe. `if (!("speechSynthesis" in window))` espera 1400 milisegundos y sigue cuando el navegador no tiene voz. El `return` del efecto cancela la voz al salir. Si se quita, la voz sigue aunque ya se compiló otra fórmula.
+
+`moveNode` empieza con `if (!dragRef.current) return`. Sin arrastre, no mueve nada. `filter` se queda con el nodo arrastrado y con los hijos, porque su ruta empieza por la ruta del padre. `forEach` escribe la posición nueva de cada uno. Si se elimina `moveNode`, las bolitas no se arrastran. `evaluate` no se entera.
+
+`compile` es la función del botón. Sus `if`, en el orden en que se ejecutan:
+
+1. `if (!response.ok)` corta cuando el servidor responde con error HTTP. Sin él, un fallo se trataría como JSON de una compilación.
+2. `if (explainRequest.current !== requestId) return` tira la respuesta vieja. `!==` es «distinto». Sin él, una compilación lenta puede pisar la fórmula nueva.
+3. `if (!compiled.ast && !compiled.errores.length) return` sale cuando la entrada está vacía. No llama a Gemini. `&&` exige las dos cosas: no hay árbol y no hay errores.
+4. `compiled.errores.length ? "/explicar-error" : "/explicar"` elige la ruta. Con errores no pide el relato de una fórmula válida.
+5. `if (improved && modelName.startsWith("gemini"))` copia los textos. El `else` guarda `modelo_ia: "error"` y no pinta un párrafo local como si fuera Gemini. Si se quita esta condición, un respaldo o un fallo se presentarían como respuesta de la IA.
+6. Los `if (explainRequest.current === requestId)` del `catch` y del `finally` solo tocan la pantalla si esa petición sigue siendo la última. `===` es igualdad estricta.
+
+`metrics` usa `useMemo`. Por dentro hay un ternario: si `errores.length` tiene elementos, el estado es `Error`; si hay `ast`, es `Listo`; si no, es `—`. Se recalcula cuando cambia `result`. Si se quita `useMemo` y se deja el cálculo suelto, las cifras seguirían, pero la forma en que está escrito el archivo dejaría de cargar si se borra el nombre importado y se sigue usando.
+
+`moveStep` no tiene `if`. `Math.max(0, Math.min(7, nextStep))` obliga al paso a quedar entre 0 y 7. Hay ocho secciones, de la 0 a la 7. Sin ese límite, `stepMenu[bounded]` no existe.
+
+`asHtml` no tiene ciclo. Encadena cuatro `replace`: `&`, `<`, `>` y el salto de línea. El primero evita que el texto de Gemini se interprete como HTML del reporte. Si se quita el de `<`, un menor que en el relato puede romper la ventana de impresión.
+
+### Dónde está cada figura
+
+| Figura | Qué muestra del código |
+|---|---|
+| `docs/imagenes/01-recorrido.png` | El orden de las llamadas: `App.jsx`, `tokenize`, `Parser.parse`, `evaluate` y, al final, Gemini. |
+| `docs/imagenes/05-fichas.png` | Las siete fichas que el `while` de `lexico.py` agrega con `append`. |
+| `docs/imagenes/04-precedencia.png` | `expression` llama a `term`, y `term` llama a `factor`. |
+| `docs/imagenes/02-ast.png` | El árbol que arman los `while self._matches`. |
+| `docs/imagenes/03-pila.png` | El postorden de `emitir` y el `append` de `STORE R0`. |
+
+Esas imágenes se ven en la sección de la defensa y otra vez junto al ciclo que las produce. No hay otro documento: todo el análisis está en este README.
