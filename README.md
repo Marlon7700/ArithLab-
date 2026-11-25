@@ -2,6 +2,8 @@
 
 Simulador interactivo de un compilador aritmético para el proyecto final de Teoría de Compiladores. La lógica está en Python (FastAPI) y la interfaz en React + Vite. El lenguaje solo acepta números enteros y los operadores `+`, `-`, `*` y `/`.
 
+La defensa del código, con el recorrido de `10 + 25 * 10 - 4`, los imports, las estructuras y las preguntas de la profesora, está en [Análisis técnico adicional para la defensa](#defensa). El mismo material, con las figuras listas para abrir en Word, está en [`docs/ArithLab-analisis-tecnico.docx`](docs/ArithLab-analisis-tecnico.docx). Lo que sigue debajo de este párrafo se conserva igual.
+
 ## Estructura
 
 ```text
@@ -1710,3 +1712,306 @@ Para correrlas, desde la raíz del proyecto:
 ```powershell
 python -m unittest backend.pruebas
 ```
+
+
+<a id="defensa"></a>
+
+## Análisis técnico adicional para la defensa
+
+Esta parte se agrega al README que ya está arriba. No reemplaza el código ni las tablas de «qué pasa si se elimina». Sirve para explicar el programa en voz alta: qué hace cada instrucción por dentro, de dónde sale cada import y cómo responder las preguntas de la profesora. Todo está sacado de los archivos del repositorio. El Word `docs/ArithLab-analisis-tecnico.docx` trae las mismas figuras y las respuestas desarrolladas.
+
+### 1. Estructura, módulos y recorrido
+
+| Carpeta o archivo | Para qué está |
+|---|---|
+| `backend/lexico.py` | Reconoce números y operadores. Crea las fichas. Anota los caracteres inválidos. |
+| `backend/sintactico.py` | Descenso recursivo. Construye el AST. Ahí viven la precedencia y la asociación izquierda. |
+| `backend/semantico.py` | Tabla de símbolos, tabla de tipos, valor, pasos y código de pila. |
+| `backend/principal.py` | Ordena las tres fases en `/compilar`, `/explicar` y `/explicar-error`. |
+| `backend/ia.py` | Gemini redacta. No calcula la fórmula. |
+| `backend/pruebas.py` | Fija 256, la asociación, las posiciones y la pila, sin llamar a la red. |
+| `backend/__init__.py` | Vacío, 0 bytes. Marca `backend` como paquete para los imports relativos. |
+| `frontend/src/App.jsx` | Envía la fórmula y dibuja fichas, árbol, tablas y textos. |
+| `frontend/src/main.jsx` | Monta `<App />` en `#root`. No compila. |
+| `models/` | JSON de muestra. El compilador no los abre al ejecutar. |
+
+La lógica del compilador está en `lexico.py`, `sintactico.py`, `semantico.py` y en `compile_expression`. El frontend y `ia.py` muestran el resultado.
+
+Se relacionan así: `App.jsx` hace `POST /compilar`. `compile_expression` llama a `tokenize`. Si no hay error léxico, hace `Parser(fichas).parse()`. Con la raíz llama a `build_tables`, `evaluate`, `generate_machine_code` y `build_resolution_steps`. El navegador llama después a `POST /explicar`, que vuelve a compilar y pasa el diccionario a `generate_explanation`.
+
+![Recorrido de una fórmula](docs/imagenes/01-recorrido.png)
+
+Recorrido de `10 + 25 * 10 - 4`, de izquierda a derecha:
+
+1. El usuario escribe la fórmula. `compile` en `App.jsx` envía `source`, `zero_based` y `hora_cliente`.
+2. `tokenize` devuelve siete fichas y cero errores. Los espacios no entran a la lista.
+3. `expression` arma la raíz `-`, con la suma a la izquierda y el `4` a la derecha. El `*` queda debajo de la suma.
+4. `evaluate` devuelve 256. `build_tables` guarda `10`, `25` y `4`. `generate_machine_code` emite la pila y cierra con `STORE R0`.
+5. `/explicar` le entrega esos datos a Gemini. La interfaz muestra el párrafo solo si `modelo_ia` empieza por `gemini`.
+
+Si el carácter no es dígito, espacio ni `+ - * /`, la respuesta de `/compilar` vuelve con las fichas reconocidas y con `ast` en `None`. No hay direcciones ni pila.
+
+### 2. Qué hace cada bloque por dentro
+
+El código completo está en las secciones de arriba. Aquí va lo que ocurre dentro de las instrucciones que suelen preguntar.
+
+En `tokenize`, el ciclo es:
+
+```python
+while indice < len(fuente):
+    caracter = fuente[indice]
+    if caracter.isspace():
+        indice += 1
+        continue
+    if caracter.isdigit():
+        inicio = indice
+        while indice < len(fuente) and fuente[indice].isdigit():
+            indice += 1
+        fichas.append(Token("NÚMERO", int(fuente[inicio:indice]), inicio + 1))
+        continue
+    if caracter in _OPERADORES:
+        fichas.append(Token("OPERADOR", caracter, indice + 1))
+    else:
+        errores.append(...)
+    indice += 1
+```
+
+- `len(fuente)` es la cantidad de caracteres. El `while` sigue mientras el índice quepa en el texto.
+- Se usa `while` porque el avance no es de un carácter fijo: el ciclo interno de los dígitos adelanta varios lugares. Un `for` que entregara un carácter por vuelta chocaría con ese índice.
+- `isspace()` detecta espacio, tabulador y salto de línea. `continue` salta el resto del cuerpo. Si se quita, el espacio cae al `else`, se reporta como error y el `indice += 1` del final se ejecuta otra vez: se pierde el carácter siguiente. `10 + 4` dejaría de compilar.
+- `isdigit()` abre un número. `inicio` recuerda el primer dígito. `int(...)` convierte el recorte, así `10` es el entero diez. La posición es `inicio + 1` porque se cuenta desde 1. `append` agrega la ficha al final, en el orden de la fórmula.
+- `_OPERADORES` es la cadena `"+-*/"`. El `else` anota el carácter y la posición, y el ciclo sigue. Por eso `7 $ 3 & 2` reporta la posición 3 y la 7, y conserva los tres números.
+- El `indice += 1` del final es indispensable para operadores y para caracteres inválidos. Si se elimina, el índice no avanza y la función no termina.
+- `return fichas, errores` entrega las dos listas. `compile_expression` las abre en ese orden. Sin ese `return`, la ruta no tiene primera fase.
+
+En el parser, la instrucción que define las sumas es:
+
+```python
+def expression(self) -> ASTNode:
+    nodo = self.term()
+    while self._matches("+", "-"):
+        operador = self._consume().valor
+        nodo = ASTNode(operador, nodo, self.term())
+    return nodo
+```
+
+- `self` es el objeto `Parser`. Guarda `fichas` y `posicion`. `expression`, `term`, `factor`, `_matches` y `_consume` comparten ese cursor. Si `posicion` fuera local de `parse`, las otras funciones no sabrían qué ficha están leyendo.
+- `_matches("+", "-")` no consume. Exige que queden fichas, que la actual sea `OPERADOR` y que el símbolo sea `+` o `-`. El `while` repite mientras eso sea cierto.
+- `_consume` devuelve la ficha y hace `self.posicion += 1`. `term()` lee el lado derecho, donde `*` y `/` ya quedaron agrupados. El nodo anterior pasa a ser el hijo izquierdo. Por eso `100 - 20 - 5` es `((100 - 20) - 5)` y vale 75.
+- Si se quita el `while`, solo se lee el primer término. Un `for` no sabe de antemano cuántos operadores hay, y cada vuelta gasta un operador más un término completo.
+- `term()` repite el mismo patrón con `"*"` y `"/"`, y se llama antes de colgar el `+`. En `10 + 25 * 10 - 4` el producto es hijo de la suma y el resultado es 256.
+- `factor()` solo acepta tipo `NÚMERO`. Crea una hoja. Un operador en ese lugar lanza `ValueError` con la posición.
+- Al final, `parse` comprueba `self.posicion != len(self.fichas)`. Si sobra una ficha, la fórmula no se acepta a medias. Esa comprobación no conviene quitarla.
+
+En `evaluate` una hoja hace `return nodo.valor`. Un operador llama primero a `evaluate` del hijo izquierdo y después al derecho. Recién entonces entran los `if` de `+`, `-` y `*`. El caso que queda es la división: si `derecha == 0` lanza `ZeroDivisionError` con el texto «No se puede dividir entre cero». Un cociente exacto vuelve a `int`; `96 / 25` se queda en `3.84`. Esos `if` no son intercambiables: si se borra el de `*`, el flujo cae en la división y el 256 desaparece.
+
+`_collect_numbers` hace `append` solo cuando el entero todavía no está en la lista. El segundo `10` reutiliza `dir_1`. `generate_machine_code` visita izquierda, derecha y después el operador, y al terminar hace `append` de `STORE R0`.
+
+### 3. Imports y librerías
+
+Revisé cada `import` de `backend/` y el arranque del frontend. En los `.py` no hay un import escrito que el mismo archivo deje sin usar.
+
+| Import | De dónde sale | Para qué se usa | Si se elimina |
+|---|---|---|---|
+| `dataclass` | Biblioteca estándar | Declara `Token` y `ASTNode`. | Esas clases no se crean. |
+| `from .lexico import Token` | Import relativo, `sintactico.py` | El parser conoce la ficha. | `sintactico.py` no carga. |
+| `from .sintactico import ASTNode` | Import relativo, `semantico.py` | Las funciones recorren el árbol. | No hay tablas, valor ni pila. |
+| `re` | Biblioteca estándar, `principal.py` e `ia.py` | Resta 1 en «posición N» y parte párrafos de Gemini. | La base cero no reescribe el mensaje. El cálculo sigue. |
+| `FastAPI`, `CORSMiddleware` | Paquete `fastapi` de `requirements.txt` | Publican las rutas y aceptan el navegador. | No hay API, o el navegador bloquea la respuesta. |
+| `AliasChoices`, `BaseModel`, `ConfigDict`, `Field` | `pydantic`, que instala FastAPI | Aceptan `source` o `fuente`, y `zero_based` o `base_cero`. | El JSON de `App.jsx` se rechaza. |
+| `tokenize`, `Parser`, `build_tables`, `evaluate`, `generate_machine_code`, `build_resolution_steps` | Imports relativos dentro de `principal.py` | Arman `/compilar`. | Se apaga la fase cuyo nombre se quite. |
+| `generate_explanation`, `generate_error_explanation` | `from .ia` | Rutas de texto. | `/compilar` sigue. Las tarjetas no. |
+| `json`, `os`, `urllib.request`, `urllib.error`, `datetime`, `Path` | Biblioteca estándar, `ia.py` | Hora, clave, POST a Gemini y lectura del JSON. | `ia.py` no carga. El compilador no los necesita para el 256. |
+| `load_dotenv` | `python-dotenv` | Lee `backend/.env` aunque el servidor arranque en la raíz. | El cálculo sigue. Gemini no ve `GEMINI_API_KEY`. |
+| `os`, `unittest` | Biblioteca estándar, `pruebas.py` | Quitan la clave y definen las siete pruebas. | El simulador sigue. Se deja de vigilar esos casos. |
+| `useEffect`, `useMemo`, `useState`, `useRef` | Paquete `react` | Estado, reloj, métricas y arrastre. Los cuatro se usan. | `App.jsx` no carga. |
+| `React`, `createRoot` | `react` y `react-dom/client` | Montan la página. `React` se usa en `React.StrictMode`. | La página queda en blanco. |
+| Bootstrap y `./styles.css` | npm y el propio CSS | Rejilla y tema. | Sin el import de `styles.css`, `main.jsx` no encuentra el archivo. |
+| `defineConfig`, `react` en `vite.config.js` | `vite` y `@vitejs/plugin-react` | Arrancan el frontend de desarrollo. | `npm run dev` del frontend no levanta. |
+
+Un import relativo (`from .lexico import Token`) busca dentro del paquete `backend`. El punto significa «esta carpeta». Por eso el arranque es `python -m uvicorn backend.principal:app`. Si se ejecuta un archivo suelto que contiene `from .lexico`, Python avisa que el import relativo no tiene paquete padre.
+
+`__init__.py` no define funciones. Está vacío a propósito. Los imports de arriba funcionan porque `backend` se carga como paquete. No hay que mover reglas del compilador a ese archivo.
+
+`requirements.txt` fija FastAPI 0.115.6, Uvicorn 0.34.0 y python-dotenv 1.0.1. Uvicorn es el proceso del puerto 8000. El frontend usa React 18, Vite 6, Bootstrap 5 y Tailwind 3. Tailwind entra por `@tailwind` en `styles.css`. `concurrently`, en el `package.json` de la raíz, levanta las dos partes con `npm run dev`.
+
+### 4. Clases, funciones y métodos
+
+| Nombre | Responsabilidad | Recibe | Devuelve | Fase |
+|---|---|---|---|---|
+| `Token` | Ficha inmutable (`frozen=True`). | `tipo`, `valor`, `posicion` | La ficha. | Léxico |
+| `tokenize` | Separa el texto. | `fuente` | Fichas y errores. | Léxico |
+| `token_as_dict` | Pasa la ficha al JSON. | Una ficha | `type`, `value`, `position`. | Hacia la interfaz |
+| `ASTNode` | Nodo u hoja. | `valor`, `izquierda`, `derecha` | El nodo. `to_dict` copia `value`, `left`, `right`. | Sintaxis |
+| `Parser.parse` | Exige una expresión completa. | Las fichas de `self` | La raíz, o `ValueError`. | Sintaxis |
+| `expression` | `+` y `-`, llamando antes a `term`. | `self` | Nodo de suma o resta. | Sintaxis |
+| `term` | `*` y `/`, llamando antes a `factor`. | `self` | Nodo de producto o cociente. | Sintaxis |
+| `factor` | Un número. | `self` | Hoja, o error sintáctico. | Sintaxis |
+| `_matches` | Mira sin consumir. | Los símbolos de ese nivel | `True` o `False`. | Sintaxis |
+| `_consume` | Entrega la ficha y avanza. | `self` | La ficha. | Sintaxis |
+| `ast_to_text` | Dibuja `├──` y `└──`. | La raíz | El texto del árbol. | Hacia la tarjeta y Gemini |
+| `build_tables` | Direcciones y tipos. | La raíz | `dir_n` y `entero`. | Semántica |
+| `evaluate` | Calcula. | La raíz | `256` en el ejemplo, o lanza división entre cero. | Semántica |
+| `generate_machine_code` | Pila en postorden. | La raíz | `PUSH`, operación y `STORE R0`. | Semántica |
+| `build_resolution_steps` | Reducciones. | La raíz | `calculation`, `expression`, `priority`. | Semántica |
+| `CompileRequest` | Valida el cuerpo. | `source`, `zero_based`, `hora_cliente` | El objeto de la ruta. | API |
+| `compile_expression` | Une las fases. | `CompileRequest` | El diccionario, con textos vacíos. | API |
+| `generate_explanation` | Pide el relato. | Fórmula, diccionario y hora | Cinco textos, o error. | Explicación |
+
+`Token` no se puede modificar después de crearlo: es el dato que salió del texto. `ASTNode` sí recibe los hijos en el constructor; una hoja los deja en `None`. Quitar `Token` apaga el léxico. Quitar `ASTNode` apaga el árbol y todo lo que lo recorre. Quitar `evaluate` borra el 256 aunque el dibujo siga. Quitar `generate_explanation` deja `/compilar` igual.
+
+Arriba, en «Qué pasa si se quita cada parte de los `.py`», está la consecuencia de borrar cada función, cada `if` y cada ciclo.
+
+### 5. Instrucciones y estructuras
+
+| Instrucción | Dónde está | Por qué se usa así |
+|---|---|---|
+| `while indice < len(fuente)` | `tokenize` | El paso cambia de tamaño. Un `for` de un carácter relee dígitos o se los salta. |
+| `while` de dígitos | `tokenize` | Junta `10` y `25` en un entero. Un solo `if` partiría el número. |
+| `continue` | Después del espacio y del número | Evita clasificar otra vez el carácter y evita el segundo `indice += 1`. |
+| `if` / `else` | Carácter del léxico | Espacio, dígito u operador. Lo demás es error, y el recorrido sigue para listarlos todos. |
+| `while self._matches("+", "-")` | `expression` | Hay cero o más sumas. No se pueden contar antes de mirar la ficha. El nodo viejo queda a la izquierda. |
+| `while self._matches("*", "/")` | `term` | Igual, en el nivel que `expression` llama primero. Esa llamada es la precedencia. |
+| `if ficha.tipo != "NÚMERO"` | `factor` | La gramática pide un operando. Un operador suelto es error sintáctico. |
+| `return` | Cada función | `tokenize` devuelve dos listas. `expression` devuelve el nodo. `evaluate` devuelve el número. `_matches` devuelve un booleano. |
+| `append` | Fichas, errores, instrucciones, pasos, símbolos | Agrega al final y conserva el orden en que aparecieron. |
+| `self` | `Parser` | El cursor tiene que seguir vivo entre `expression`, `term` y `factor`. |
+| `len` | Texto, fichas y errores | Cierra los `while` y detecta fichas sobrantes o la lista de errores. |
+| `isdigit` | `tokenize` | Abre un entero. El menos no entra aquí: es operador. |
+| `isspace` | `tokenize` | Descarta el espacio entre `10` y `+`. |
+| `not in numeros` | `_collect_numbers` | El segundo `10` no crea otra `dir_`. |
+| `max` y `next` | `build_resolution_steps` | `*` y `/` valen 2. `+` y `-` valen 1. Entre iguales, gana la de más a la izquierda. |
+
+`self._matches("+", "-")` se lee así: del parser actual, mira si la ficha en `self.posicion` es un operador `+` o `-`. Hace falta porque `expression` debe seguir agrupando mientras el usuario escriba sumas, y debe detenerse cuando aparezca el fin de la fórmula o una ficha que ya no es de ese nivel. No consume, para que `_consume` pueda quedarse con el operador dentro del ciclo.
+
+### 6. Fases del compilador con el ejemplo
+
+`10 + 25 * 10 - 4` tiene espacios. Las posiciones, desde 1, quedan así.
+
+![Fichas del ejemplo](docs/imagenes/05-fichas.png)
+
+**Léxico.** `tokenize` salta espacios, junta dígitos y crea `OPERADOR` para `+ - * /`. Un carácter distinto se agrega a `errores` y el `while` continúa. Con `$` y `&` hay fichas de los números y dos mensajes. Con la fórmula válida hay siete fichas y la lista de errores vacía.
+
+**Sintaxis.** `parse` llama a `expression`. Esa llama a `term`, y `term` llama a `factor`, que crea la hoja `10`. La ficha siguiente es `+`, así que el `while` de `*` y `/` no entra. `expression` consume el `+` y pide otro `term`. Ese `term` lee `25`, consume `*` y lee el segundo `10`. El nodo `*` queda armado antes de volver a la suma. Después `expression` consume `-` y el último `term` lee `4`. La raíz es la resta. `parse` comprueba que el cursor llegó al final.
+
+![Árbol del ejemplo](docs/imagenes/02-ast.png)
+
+![Precedencia por llamadas](docs/imagenes/04-precedencia.png)
+
+La forma con paréntesis es `((10 + (25 * 10)) - 4)`. `models/ast-node.example.json` muestra otro árbol, `(10 + 25) - 4`, y el programa no lo carga. El árbol que produce esta fórmula es el de la figura, con siete nodos.
+
+**Semántica.** `_collect_numbers` anota `10`, luego `25`, ignora el segundo `10` y anota `4`.
+
+| Símbolo | Dirección | Tipo |
+|---|---|---|
+| 10 | dir_1 | entero |
+| 25 | dir_2 | entero |
+| 4 | dir_3 | entero |
+
+`evaluate` hace `25 * 10 = 250`, `10 + 250 = 260` y `260 - 4 = 256`. `build_resolution_steps` usa la prioridad 2 para `*` y `/` antes que la prioridad 1. `generate_machine_code` emite el postorden.
+
+![Pila del ejemplo](docs/imagenes/03-pila.png)
+
+**Cómo se hablan.** El léxico no conoce el árbol. El parser no calcula 256. La semántica no vuelve a leer el texto: recorre nodos. `principal.py` corta en `if errores_lexicos` para no pedirle un árbol a una lista con un carácter inválido. Gemini recibe el diccionario ya lleno y lo narra. La hora del saludo sale de `hora_cliente`, que arma `clientClock` en el navegador.
+
+### 7. Qué se puede modificar y qué no
+
+Estas líneas tienen quien las usa. No sobran.
+
+| Código | Función | Si se elimina | Error que aparece | Alternativa real |
+|---|---|---|---|---|
+| `indice += 1` tras el carácter inválido | El léxico avanza. | `tokenize` no termina. | La petición se queda colgada. | Hay que avanzar el índice en todos los caminos. No se puede borrar el avance. |
+| `continue` del espacio | No trata el espacio como ficha. | El espacio es error y se salta el carácter siguiente. | `10 + 4` no compila. | El lenguaje permite espacios. El `continue` es la forma de saltarlos. |
+| `while` de `expression` y el de `term` | Precedencia y repetición. | `10 + 25 * 10 - 4` deja de dar 256. | El árbol cambia de forma. | Un solo nivel iguala `+` y `*`. |
+| `ASTNode(operador, nodo, self.term())` | Asociación izquierda. | `100 - 20 - 5` deja de valer 75. | El hijo izquierdo y el derecho quedan al revés. | Colgar al derecho asociaría al revés y las pruebas fallan. |
+| `posicion != len(self.fichas)` | Rechaza lo que sobra. | Una fórmula a medias puede aceptarse. | El resultado no cubre todo el texto. | No hay reemplazo que igual acepte `10 +`. |
+| `not in numeros` | Una dirección por entero. | El `10` repetido gana otra `dir_`. | La prueba de símbolos falla. | Se puede usar un conjunto, siempre que se conserve el orden de aparición. |
+| `if derecha == 0` | División entre cero. | El fallo pasa a ser el de Python. | Cambia el mensaje que ve la interfaz. | El `except` de `principal.py` seguiría capturando `ZeroDivisionError`, con otro texto. |
+| `instrucciones.append("STORE R0")` | Guarda el tope. | La pila calcula y nadie escribe `R0`. | Falta la última instrucción del enunciado. | Otra instrucción de guardado sería otro lenguaje de máquina. |
+| `if errores_lexicos: return` | No llama al parser. | El error léxico se mezcla con el sintáctico. | Se pierde el mensaje del carácter. | El corte tiene que seguir antes de `Parser`. |
+| Claves `type`, `value`, `position`, `left`, `right` | Contrato con `App.jsx`. | El SVG o las fichas leen `undefined`. | La pantalla queda vacía con el cálculo bien hecho. | Habría que cambiar el frontend en el mismo momento. |
+
+Se puede cambiar, porque otra parte no depende del valor exacto para calcular:
+
+- El texto de un mensaje, si se actualizan las pruebas que buscan «posición 3» o «no pudo compilarse».
+- El saludo, el modelo en `backend/.env` y los colores, la voz y el arrastre del SVG.
+- `ast_to_text`. El SVG usa `to_dict`. El 256 no sale de ese dibujo.
+- El relato de Gemini. `evaluate` no lo lee.
+
+`build_local_explanations` solo corre sin `GEMINI_API_KEY`. Conviene dejar el camino sin clave de `generate_error_explanation`, porque la prueba busca la frase «no pudo compilarse».
+
+### 8. Preguntas de la profesora, con respuesta
+
+**¿Por qué separamos el lexer, el parser y la semántica?**  
+Cada archivo responde una pregunta distinta. `lexico.py` dice qué caracteres son legales y devuelve fichas. `sintactico.py` dice si forman una expresión y devuelve el árbol. `semantico.py` dice cuánto vale, qué dirección tiene cada número y qué instrucciones salen. `compile_expression` las llama en ese orden y, si el léxico falló, no construye el árbol. Un `$` no se presenta como error de gramática.
+
+**¿Cómo sabe el compilador qué operación va primero?**  
+Por la profundidad de la llamada. `expression` no lee el número: llama a `term`. `term` llama a `factor`. El `*` queda como hijo antes de que exista el nodo `+`. `evaluate` y la pila recorren primero lo más hondo. En el ejemplo, `25 * 10` ocurre antes que la suma, y el resultado es 256.
+
+**¿Cómo se construye el AST?**  
+`factor` crea la hoja con `ASTNode(ficha.valor)`. Cada vez que `term` o `expression` ven su operador, hacen `ASTNode(operador, nodo_anterior, nuevo_termino)`. Lo ya leído queda a la izquierda. `to_dict` publica `value`, `left` y `right`. El ejemplo tiene siete nodos: resta, suma, 10, producto, 25, 10 y 4.
+
+**¿Qué hace `while self._matches("+", "-")`?**  
+`self` es el parser. `_matches` mira la ficha actual sin gastarla. El ciclo sigue mientras sea un operador `+` o `-`. Dentro, `_consume` toma el operador y `term()` lee el otro lado. Si se elimina el `while`, `100 - 20 - 5` se queda en el primer término.
+
+**¿Por qué `while` y no `for` en el léxico?**  
+El índice de un número salta varios caracteres. El `while indice < len(fuente)` deja ese avance en manos de la función. Un `for` de un paso fijo volvería a ver el segundo dígito.
+
+**¿Por qué `while` y no `for` en `expression` y `term`?**  
+No se sabe cuántos operadores vienen, y cada vuelta consume un operador más un término entero, que puede traer productos. El `while` pregunta si la ficha siguiente es de ese nivel.
+
+**¿Qué pasa si quitamos el `continue` del espacio?**  
+El espacio se registra como error léxico y el índice avanza una segunda vez. Se pierde el carácter que iba después. La fórmula con espacios deja de compilar.
+
+**¿Qué pasa si quitamos el `indice += 1` del final?**  
+Un operador o un carácter inválido no avanzan. El `while` no llega al final y la función no regresa.
+
+**¿Para qué sirve `Token`?**  
+Guarda tipo, valor y posición. `frozen=True` impide cambiar la ficha después de crearla. `token_as_dict` la pasa a `type`, `value` y `position`. Sin la clase no hay lista que el parser recorra.
+
+**¿Para qué sirve `ASTNode`?**  
+Es el nodo. `valor` es el número o el símbolo. `izquierda` y `derecha` son los operandos. En una hoja valen `None`. Tablas, evaluación, pila y pasos recorren esta clase.
+
+**¿Qué es `self`?**  
+Es el `Parser` concreto. `self.fichas` es la lista del léxico y `self.posicion` es el cursor, que empieza en 0. `_consume` lo incrementa. Así, cuando `factor` regresa, `expression` sigue en la ficha correcta.
+
+**¿Por qué `append`?**  
+Las fichas, los errores, las instrucciones y los pasos se descubren en orden. `append` los deja al final de la lista que las otras fases recorren.
+
+**¿Qué hacen `len`, `isdigit` e `isspace`?**  
+`len` cierra los recorridos y detecta fichas sobrantes. `isdigit` abre un entero. `isspace` reconoce el hueco entre número y operador. El menos está en `_OPERADORES`, así que `-4` al inicio llega a `factor` como operador y es error sintáctico. El punto de `3.5` no es dígito ni operador: es error léxico.
+
+**¿Qué devuelve cada `return` importante?**  
+`tokenize` devuelve fichas y errores. `expression` devuelve un `ASTNode`. `_matches` devuelve verdadero o falso. `evaluate` devuelve el número. `generate_machine_code` devuelve la lista que termina en `STORE R0`. `compile_expression` devuelve el diccionario de la ruta, con las explicaciones vacías.
+
+**¿Qué pasa si `parse` ya no comprueba que se consumieron todas las fichas?**  
+Puede devolver un nodo y dejar texto sin leer. El resultado dejaría de corresponder a toda la fórmula.
+
+**¿Por qué `100 - 20 - 5` vale 75?**  
+La segunda resta toma `(100 - 20)` como hijo izquierdo. `80 - 5` es 75. `8 / 2 / 2` vale 2 por la misma razón. Lo fijan las pruebas.
+
+**¿Por qué el 10 repetido tiene una sola dirección?**  
+`_collect_numbers` no hace `append` si el entero ya está. Quedan `dir_1` para 10, `dir_2` para 25 y `dir_3` para 4. El tipo de las tres filas es `entero`.
+
+**¿Quién calcula el 256?**  
+`evaluate`, en `semantico.py`. Gemini recibe ese 256 y lo cuenta. `App.jsx` pinta el relato solo cuando el nombre del modelo empieza por `gemini`.
+
+**¿Por qué ese orden de la pila y para qué está `STORE R0`?**  
+`emitir` visita izquierda, derecha y después el operador. `MUL` llega cuando en la pila están 25 y 10. `STORE R0` se agrega una vez, al final, y deja el 256 en el registro.
+
+**¿Qué pasa con dividir entre cero, con la caja vacía y con un carácter inválido?**  
+`10 / 0` lanza `ZeroDivisionError` con «No se puede dividir entre cero», y el `except` de `compile_expression` lo guarda en `errores`. La caja vacía responde «La entrada está vacía…» y no llama al parser. El carácter inválido se acumula y el léxico sigue, para poder reportar el `$` y el `&` juntos.
+
+**¿Hay imports sin usar?**  
+En los archivos Python revisados, no. En `App.jsx` también se usan los cuatro hooks: `useMemo` arma las métricas. En `main.jsx`, `React` se usa en `StrictMode`.
+
+**¿Para qué está `__init__.py`?**  
+Vacío. Hace explícito que `backend` es un paquete, que es la condición de `from .lexico`, `from .sintactico`, `from .semantico` y `from .ia`.
+
+**¿Qué hace el interruptor de posiciones desde cero?**  
+`tokenize` siempre numera desde 1. Si llega `zero_based`, `compile_expression` resta 1 a cada ficha y `_convert_error_positions` reescribe «posición N». En `7 $ 3 & 2` las posiciones 3 y 7 pasan a 2 y 6.
+
+**¿Qué línea no debo borrar aunque se vea pequeña?**  
+El `continue` del espacio, el `indice += 1` del carácter inválido, los dos `while` del parser, la comprobación de fichas sobrantes, el `not in numeros` y el `STORE R0`. Cada una cambia un resultado que el programa ya muestra: los espacios, el fin del análisis, el 256, el 75, las direcciones únicas o el registro final.
+
+Para cerrar: el navegador envía el texto, el léxico entrega siete fichas, el parser arma `((10 + (25 * 10)) - 4)`, la semántica guarda tres direcciones y evalúa 256, y Gemini cuenta esa historia con la hora de quien está frente a la pantalla.
